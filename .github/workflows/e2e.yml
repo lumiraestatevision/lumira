@@ -56,6 +56,11 @@ jobs:
       - name: Images bauen
         run: make build
 
+      # Der Frontend-Dev-Container (User node, UID 1000) mountet ./frontend und legt dort
+      # next-env.d.ts an. Der Checkout gehört auf dem Runner aber UID 1001 → EACCES.
+      - name: Frontend-Verzeichnis für den Container beschreibbar machen
+        run: chmod -R a+rwX frontend
+
       - name: Stack starten
         run: make up
 
