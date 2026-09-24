@@ -15,9 +15,13 @@ updates:
     schedule:
       interval: weekly
       day: monday
+    # Nur uv.lock aktualisieren – die Mindestversionen in den pyproject.toml bleiben stehen
+    # (sonst ein PR je Paket, der nur ">=" anhebt).
+    versioning-strategy: lockfile-only
     open-pull-requests-limit: 5
     groups:
       python-minor-patch:
+        patterns: ["*"]
         update-types: [minor, patch]
 
   - package-ecosystem: npm  # Frontend (pnpm-lock.yaml)
@@ -26,8 +30,16 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
+    ignore:
+      # Typen passend zur Laufzeit (Node 24) – Major-Sprung erst mit dem Node-Update.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+      # TypeScript-Majors (z. B. 7 = neuer Compiler) erst, wenn Next.js sie unterstützt.
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
     groups:
       frontend-minor-patch:
+        patterns: ["*"]
         update-types: [minor, patch]
 
   - package-ecosystem: docker  # Basis-Images der Dockerfiles
