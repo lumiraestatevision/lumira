@@ -1,0 +1,384 @@
+# Lumira – lokale Entwicklungsumgebung
+#
+#   make up                           → Infrastruktur + Services gemäß COMPOSE_PROFILES aus .env
+#   COMPOSE_PROFILES=gpu,vr make up   → recognizer auf der GPU + Unreal-Stub
+#
+# Profile (genau EINES von cpu/gpu wählen, vr optional):
+#   cpu  recognizer mit CPU-PyTorch (funktioniert überall)
+#   gpu  recognizer mit CUDA-PyTorch (NVIDIA-GPU + NVIDIA Container Toolkit nötig)
+#   vr   Unreal-Stub; ohne ihn schließt das backend Projekte nach model.generated ab
+#        (PIPELINE_VR_ENABLED=false in .env)
+#
+# Alle Ports sind nur an 127.0.0.1 gebunden – nicht aus dem LAN erreichbar.
+
+name: lumira
+
+# ------------------------------------------------------------------ gemeinsame Bausteine
+x-python-env: &python-env
+  ENVIRONMENT: ${ENVIRONMENT:-local}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  LOG_JSON: ${LOG_JSON:-false}
+  REDIS_URL: redis://redis:6379/0
+  S3_BUCKET: ${S3_BUCKET:-lumira}
+  AWS_ENDPOINT_URL: http://minio:9000
+  AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-lumira}
+  AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-lumira-dev-secret}
+  AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-eu-central-1}
+  CONSUMER_CLAIM_IDLE_MS: ${CONSUMER_CLAIM_IDLE_MS:-30000}
+  CONSUMER_MAX_ATTEMPTS: ${CONSUMER_MAX_ATTEMPTS:-3}
+  PYTHONDONTWRITEBYTECODE: "1"
+  PYTHONUNBUFFERED: "1"
+
+x-python-service: &python-service
+  restart: unless-stopped
+  depends_on: &python-depends
+    redis:
+      condition: service_healthy
+    minio-init:
+      condition: service_completed_successfully
+  healthcheck: &python-healthcheck
+    test: ["CMD", "python", "-m", "lumira_shared.healthcheck"]
+    interval: 10s
+    timeout: 5s
+    retries: 5
+    start_period: 30s
+
+x-shared-src: &shared-src ./packages/shared/src:/app/packages/shared/src:ro
+
+x-ml-env: &ml-env
+  EASYOCR_MODULE_PATH: /models/easyocr
+  TORCH_HOME: /models/torch
+  HF_HOME: /models/huggingface
+
+services:
+  # ================================================================ Infrastruktur
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-lumira}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lumira-dev-only}
+      POSTGRES_DB: ${POSTGRES_DB:-lumira}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      # Ab PostgreSQL 18 liegt PGDATA versionsabhängig unter /var/lib/postgresql/<major>/…
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    # AOF-Persistenz: Streams und Consumer-Group-Stände überleben Neustarts.
+    command: ["redis-server", "--appendonly", "yes", "--save", ""]
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  minio:
+    # Die offiziellen minio/minio-Images werden nicht mehr veröffentlicht. Chainguard baut
+    # MinIO weiter aus dem Quellcode; "-dev" enthält zusätzlich mc und eine Shell.
+    image: cgr.dev/chainguard/minio:latest-dev
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-lumira}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-lumira-dev-secret}
+      MC_CONFIG_DIR: /tmp/.mc
+    ports:
+      - "127.0.0.1:${MINIO_API_PORT:-9000}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio-init:
+    image: cgr.dev/chainguard/minio:latest-dev
+    entrypoint: ["/bin/sh", "/scripts/create-buckets.sh"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-lumira}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-lumira-dev-secret}
+      S3_BUCKET: ${S3_BUCKET:-lumira}
+    volumes:
+      - ./infra/minio/create-buckets.sh:/scripts/create-buckets.sh:ro
+    depends_on:
+      minio:
+        condition: service_healthy
+    restart: "no"
+
+  # ================================================================ backend
+  migrate:
+    build: &backend-build
+      context: .
+      dockerfile: services/backend/Dockerfile
+      target: dev
+    image: lumira/backend:dev
+    command: ["alembic", "upgrade", "head"]
+    working_dir: /app/services/backend
+    environment:
+      <<: *python-env
+      SERVICE_NAME: migrate
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-lumira}:${POSTGRES_PASSWORD:-lumira-dev-only}@postgres:5432/${POSTGRES_DB:-lumira}
+    volumes:
+      - *shared-src
+      - ./services/backend/src:/app/services/backend/src:ro
+      - ./services/backend/migrations:/app/services/backend/migrations:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  backend:
+    <<: *python-service
+    build: *backend-build
+    image: lumira/backend:dev
+    command: >-
+      uvicorn lumira_backend.main:app --host 0.0.0.0 --port 8000
+      --reload --reload-dir /app/services/backend/src --reload-dir /app/packages/shared/src
+    environment:
+      <<: *python-env
+      SERVICE_NAME: backend
+      PORT: "8000"
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-lumira}:${POSTGRES_PASSWORD:-lumira-dev-only}@postgres:5432/${POSTGRES_DB:-lumira}
+      PIPELINE_VR_ENABLED: ${PIPELINE_VR_ENABLED:-false}
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-200}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - *shared-src
+      - ./services/backend/src:/app/services/backend/src:ro
+      - ./services/backend/migrations:/app/services/backend/migrations:ro
+    depends_on:
+      <<: *python-depends
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  # ================================================================ Pipeline-Worker
+  parser:
+    <<: *python-service
+    build:
+      context: .
+      dockerfile: services/parser/Dockerfile
+      target: dev
+    image: lumira/parser:dev
+    command: >-
+      uvicorn lumira_parser.main:app --host 0.0.0.0 --port 8001
+      --reload --reload-dir /app/services/parser/src --reload-dir /app/packages/shared/src
+    environment:
+      <<: *python-env
+      SERVICE_NAME: parser
+      PORT: "8001"
+    ports:
+      - "127.0.0.1:8001:8001"
+    volumes:
+      - *shared-src
+      - ./services/parser/src:/app/services/parser/src:ro
+
+  recognizer: &recognizer
+    <<: *python-service
+    profiles: [cpu]
+    build:
+      context: .
+      dockerfile: services/recognizer/Dockerfile
+      target: dev
+      args:
+        TORCH_VARIANT: cpu
+    image: lumira/recognizer:dev-cpu
+    command: >-
+      uvicorn lumira_recognizer.main:app --host 0.0.0.0 --port 8002
+      --reload --reload-dir /app/services/recognizer/src --reload-dir /app/packages/shared/src
+    environment: &recognizer-env
+      <<: [*python-env, *ml-env]
+      SERVICE_NAME: recognizer
+      PORT: "8002"
+      RECOGNIZER_DEVICE: cpu
+    ports:
+      - "127.0.0.1:8002:8002"
+    volumes:
+      - *shared-src
+      - ./services/recognizer/src:/app/services/recognizer/src:ro
+      - ml-models:/models
+    healthcheck:
+      <<: *python-healthcheck
+      start_period: 120s  # Modelle laden dauert
+    deploy:
+      resources:
+        limits:
+          memory: 4g
+
+  recognizer-gpu:
+    <<: *recognizer
+    profiles: [gpu]
+    build:
+      context: .
+      dockerfile: services/recognizer/Dockerfile
+      target: dev
+      args:
+        TORCH_VARIANT: cu130
+    image: lumira/recognizer:dev-cu130
+    environment:
+      <<: *recognizer-env
+      RECOGNIZER_DEVICE: auto  # cuda, falls verfügbar – sonst CPU-Fallback
+    deploy:
+      resources:
+        limits:
+          memory: 4g
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  classifier:
+    <<: *python-service
+    build:
+      context: .
+      dockerfile: services/classifier/Dockerfile
+      target: dev
+      args:
+        TORCH_VARIANT: cpu
+    image: lumira/classifier:dev
+    command: >-
+      uvicorn lumira_classifier.main:app --host 0.0.0.0 --port 8003
+      --reload --reload-dir /app/services/classifier/src --reload-dir /app/packages/shared/src
+    environment:
+      <<: [*python-env, *ml-env]
+      SERVICE_NAME: classifier
+      PORT: "8003"
+    ports:
+      - "127.0.0.1:8003:8003"
+    volumes:
+      - *shared-src
+      - ./services/classifier/src:/app/services/classifier/src:ro
+      - ml-models:/models
+    healthcheck:
+      <<: *python-healthcheck
+      start_period: 120s
+    deploy:
+      resources:
+        limits:
+          memory: 3g
+
+  blv:
+    <<: *python-service
+    build:
+      context: .
+      dockerfile: services/blv/Dockerfile
+      target: dev
+    image: lumira/blv:dev
+    command: >-
+      uvicorn lumira_blv.main:app --host 0.0.0.0 --port 8004
+      --reload --reload-dir /app/services/blv/src --reload-dir /app/packages/shared/src
+    environment:
+      <<: *python-env
+      SERVICE_NAME: blv
+      PORT: "8004"
+      # Nur dieser Service bekommt den API-Key. Ohne Key: Stub-Modus.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      BLV_MODE: ${BLV_MODE:-auto}
+      BLV_MODEL: ${BLV_MODEL:-claude-sonnet-5}
+    ports:
+      - "127.0.0.1:8004:8004"
+    volumes:
+      - *shared-src
+      - ./services/blv/src:/app/services/blv/src:ro
+
+  generator:
+    <<: *python-service
+    build:
+      context: .
+      dockerfile: services/generator/Dockerfile
+      target: dev
+      args:
+        BLENDER_VERSION: ${BLENDER_VERSION:-4.5.14}
+    image: lumira/generator:dev
+    command: >-
+      uvicorn lumira_generator.main:app --host 0.0.0.0 --port 8005
+      --reload --reload-dir /app/services/generator/src --reload-dir /app/packages/shared/src
+    environment:
+      <<: *python-env
+      SERVICE_NAME: generator
+      PORT: "8005"
+      BLENDER_BIN: /opt/blender/blender
+      BLENDER_TIMEOUT_S: ${BLENDER_TIMEOUT_S:-600}
+    ports:
+      - "127.0.0.1:8005:8005"
+    volumes:
+      - *shared-src
+      - ./services/generator/src:/app/services/generator/src:ro
+      - ./services/generator/blender_scripts:/app/services/generator/blender_scripts:ro
+    deploy:
+      resources:
+        limits:
+          memory: 3g
+
+  unreal:
+    <<: *python-service
+    profiles: [vr]
+    build:
+      context: .
+      dockerfile: services/unreal/Dockerfile
+      target: dev
+    image: lumira/unreal:dev
+    command: >-
+      uvicorn lumira_unreal.main:app --host 0.0.0.0 --port 8006
+      --reload --reload-dir /app/services/unreal/src --reload-dir /app/packages/shared/src
+    environment:
+      <<: *python-env
+      SERVICE_NAME: unreal
+      PORT: "8006"
+    ports:
+      - "127.0.0.1:8006:8006"
+    volumes:
+      - *shared-src
+      - ./services/unreal/src:/app/services/unreal/src:ro
+
+  # ================================================================ Frontend
+  frontend:
+    build:
+      context: ./frontend
+      target: dev
+    image: lumira/frontend:dev
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+      NEXT_TELEMETRY_DISABLED: "1"
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - ./frontend:/app
+      # node_modules und .next aus dem Image verwenden, nicht vom Host überschreiben.
+      - /app/node_modules
+      - /app/.next
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+volumes:
+  postgres-data:
+  redis-data:
+  minio-data:
+  ml-models:  # EasyOCR-/Torch-Gewichte, geteilt von recognizer und classifier
