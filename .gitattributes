@@ -1,0 +1,20 @@
+# Einheitlich LF – verhindert kaputte Shell-Skripte und Diff-Rauschen von Windows-Checkouts.
+* text=auto eol=lf
+
+# Windows-Skripte behalten CRLF
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binärdateien
+*.pdf  binary
+*.dwg  binary
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.webp binary
+*.fbx  binary
+*.glb  binary
+*.blend binary
+*.uasset binary
+*.umap binary

@@ -1,0 +1,119 @@
+# Lumira – uv Workspace Root
+#
+# Virtueller Root: kein [project]-Table, wird selbst nicht als Paket installiert.
+# Alle Python-Pakete liegen unter packages/* und services/* und teilen sich EIN uv.lock.
+# Das Frontend (frontend/) ist bewusst NICHT Teil des Workspace.
+
+[tool.uv]
+required-version = ">=0.12"
+
+# PyTorch-Varianten: recognizer und classifier bieten je die Extras "cpu" und "cu130".
+# CPU- und CUDA-Wheels stammen aus unterschiedlichen Indizes und dürfen nie gemeinsam
+# in einer Umgebung landen – auch nicht über Paketgrenzen hinweg.
+conflicts = [
+  [
+    { package = "lumira-recognizer", extra = "cpu" },
+    { package = "lumira-recognizer", extra = "cu130" },
+  ],
+  [
+    { package = "lumira-classifier", extra = "cpu" },
+    { package = "lumira-classifier", extra = "cu130" },
+  ],
+  [
+    { package = "lumira-recognizer", extra = "cpu" },
+    { package = "lumira-classifier", extra = "cu130" },
+  ],
+  [
+    { package = "lumira-recognizer", extra = "cu130" },
+    { package = "lumira-classifier", extra = "cpu" },
+  ],
+]
+
+[tool.uv.workspace]
+members = ["packages/*", "services/*"]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+# Werkzeuge für das gesamte Repo: pre-commit und der End-to-End-Integrationstest.
+# Test-, Lint- und Typecheck-Abhängigkeiten der einzelnen Pakete stehen in deren
+# eigener "dev"-Gruppe, damit jedes Paket für sich (z. B. in der CI) testbar ist.
+[dependency-groups]
+dev = [
+  "pre-commit>=4.0",
+  "ruff>=0.12",
+  "pyright>=1.1.400",
+  "pytest>=8.3",
+  "pytest-asyncio>=1.0",
+  "httpx>=0.28",
+  "ezdxf>=1.4",
+  "pymupdf>=1.26",
+]
+
+# --------------------------------------------------------------------------- ruff
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["packages/*/src", "services/*/src"]
+extend-exclude = ["frontend", "services/*/migrations/versions"]
+
+[tool.ruff.lint]
+select = [
+  "E",     # pycodestyle
+  "W",
+  "F",     # pyflakes
+  "I",     # isort
+  "N",     # pep8-naming
+  "UP",    # pyupgrade
+  "B",     # bugbear
+  "SIM",   # simplify
+  "ASYNC", # async-Fallen
+  "PT",    # pytest-Stil
+  "RUF",
+]
+ignore = [
+  "E501", # Zeilenlänge regelt der Formatter
+]
+# Deutsche Texte nutzen den Halbgeviertstrich – kein Tippfehler.
+allowed-confusables = ["–"]
+
+[tool.ruff.lint.per-file-ignores]
+# Blender-Skripte laufen in Blenders eigenem Python, bpy ist dort ein Builtin.
+"services/generator/blender_scripts/*" = ["N", "UP"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["lumira_*"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+# --------------------------------------------------------------------------- pyright
+[tool.pyright]
+pythonVersion = "3.12"
+venvPath = "."
+venv = ".venv"
+typeCheckingMode = "standard"
+include = ["packages", "services", "tests"]
+exclude = [
+  "**/__pycache__",
+  "**/.venv",
+  "frontend",
+  "services/generator/blender_scripts", # bpy existiert nur innerhalb von Blender
+]
+reportMissingTypeStubs = false
+
+# --------------------------------------------------------------------------- pytest
+# Gilt nur für den Integrationstest unter tests/. Jedes Paket hat eine eigene pytest-Konfiguration.
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["--import-mode=importlib", "-ra"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+markers = ["integration: benötigt den laufenden Docker-Compose-Stack"]

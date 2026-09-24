@@ -1,0 +1,49 @@
+[project]
+name = "lumira-classifier"
+version = "0.1.0"
+description = "Lumira Classifier: Raumtypen klassifizieren, deutsches Label-Mapping (Port 8003)"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "lumira-shared",
+  "easyocr>=1.7.2",
+  "scikit-learn>=1.6",
+]
+
+# EasyOCR zieht torch nach. Die Variante wird wie beim recognizer über ein Extra gewählt,
+# damit das classifier-Image die schlanken CPU-Wheels bekommt.
+[project.optional-dependencies]
+cpu = ["torch>=2.8", "torchvision>=0.23"]
+cu130 = ["torch>=2.8", "torchvision>=0.23"]
+
+[dependency-groups]
+dev = [
+  "pytest>=8.3",
+  "pytest-asyncio>=1.0",
+  "pytest-cov>=6.0",
+  "httpx>=0.28",
+  "fakeredis>=2.30",
+  "moto[s3]>=5.1",
+  "ruff>=0.12",
+  "pyright>=1.1.400",
+]
+
+[tool.uv.sources]
+lumira-shared = { workspace = true }
+torch = [
+  { index = "pytorch-cpu", extra = "cpu" },
+  { index = "pytorch-cu130", extra = "cu130" },
+]
+torchvision = [
+  { index = "pytorch-cpu", extra = "cpu" },
+  { index = "pytorch-cu130", extra = "cu130" },
+]
+
+[build-system]
+requires = ["uv_build>=0.12.18,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["--import-mode=importlib", "-ra"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"

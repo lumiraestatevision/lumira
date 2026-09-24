@@ -1,0 +1,38 @@
+[project]
+name = "lumira-backend"
+version = "0.1.0"
+description = "Lumira API Gateway: Projekte, Uploads, Pipeline-Status (Port 8000)"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "lumira-shared",
+  "sqlalchemy[asyncio]>=2.0.40",
+  "asyncpg>=0.30",
+  "alembic>=1.16",
+  "python-multipart>=0.0.20",
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=8.3",
+  "pytest-asyncio>=1.0",
+  "pytest-cov>=6.0",
+  "httpx>=0.28",
+  "fakeredis>=2.30",
+  "moto[s3]>=5.1",
+  "aiosqlite>=0.21",
+  "ruff>=0.12",
+  "pyright>=1.1.400",
+]
+
+[tool.uv.sources]
+lumira-shared = { workspace = true }
+
+[build-system]
+requires = ["uv_build>=0.12.18,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["--import-mode=importlib", "-ra"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"

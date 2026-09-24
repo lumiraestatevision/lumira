@@ -1,0 +1,23 @@
+# Build-Context ist das Repo-Root. Alles, was kein Image braucht, bleibt draußen –
+# das hält den Context klein und die Layer-Caches stabil.
+.git
+.github
+.vscode
+.idea
+**/.venv
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+**/.ruff_cache
+**/.coverage
+**/htmlcov
+.env
+.env.*
+!.env.example
+
+frontend/node_modules
+frontend/.next
+
+models
+tmp
+.cache

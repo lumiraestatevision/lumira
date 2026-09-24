@@ -1,0 +1,36 @@
+[project]
+name = "lumira-generator"
+version = "0.1.0"
+description = "Lumira Generator: 3D-Modell mit Blender headless erzeugen, FBX- und glTF-Export (Port 8005)"
+requires-python = ">=3.12,<3.13"
+# Kein bpy: Die bpy-Wheels für Blender 4.x gibt es nur für Python 3.11. Der Service ruft
+# stattdessen das Blender-Binary als Subprozess auf (blender -b --python blender_scripts/…).
+dependencies = [
+  "lumira-shared",
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=8.3",
+  "pytest-asyncio>=1.0",
+  "pytest-cov>=6.0",
+  "httpx>=0.28",
+  "fakeredis>=2.30",
+  "moto[s3]>=5.1",
+  "ruff>=0.12",
+  "pyright>=1.1.400",
+]
+
+[tool.uv.sources]
+lumira-shared = { workspace = true }
+
+[build-system]
+requires = ["uv_build>=0.12.18,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["--import-mode=importlib", "-ra"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+markers = ["blender: benötigt ein installiertes Blender-Binary"]

@@ -1,0 +1,50 @@
+[project]
+name = "lumira-recognizer"
+version = "0.1.0"
+description = "Lumira Recognizer: KI-Planerkennung für Wände, Türen, Fenster (Port 8002)"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "lumira-shared",
+  "opencv-python-headless>=4.11",
+  "easyocr>=1.7.2",
+  "numpy>=2.0",
+]
+
+# Genau EINE Variante wählen:  uv sync --package lumira-recognizer --extra cpu | --extra cu130
+[project.optional-dependencies]
+cpu = ["torch>=2.8", "torchvision>=0.23"]
+cu130 = ["torch>=2.8", "torchvision>=0.23"]
+
+[dependency-groups]
+dev = [
+  "pytest>=8.3",
+  "pytest-asyncio>=1.0",
+  "pytest-cov>=6.0",
+  "httpx>=0.28",
+  "fakeredis>=2.30",
+  "moto[s3]>=5.1",
+  "ruff>=0.12",
+  "pyright>=1.1.400",
+]
+
+[tool.uv.sources]
+lumira-shared = { workspace = true }
+torch = [
+  { index = "pytorch-cpu", extra = "cpu" },
+  { index = "pytorch-cu130", extra = "cu130" },
+]
+torchvision = [
+  { index = "pytorch-cpu", extra = "cpu" },
+  { index = "pytorch-cu130", extra = "cu130" },
+]
+
+[build-system]
+requires = ["uv_build>=0.12.18,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["--import-mode=importlib", "-ra"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+markers = ["gpu: benötigt eine CUDA-fähige GPU"]

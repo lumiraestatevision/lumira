@@ -1,0 +1,35 @@
+[project]
+name = "lumira-blv"
+version = "0.1.0"
+description = "Lumira BLV: Bauleistungsverzeichnis per LLM auswerten (Port 8004)"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "lumira-shared",
+  "anthropic>=0.69",
+  "pymupdf>=1.26",
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=8.3",
+  "pytest-asyncio>=1.0",
+  "pytest-cov>=6.0",
+  "httpx>=0.28",
+  "fakeredis>=2.30",
+  "moto[s3]>=5.1",
+  "ruff>=0.12",
+  "pyright>=1.1.400",
+]
+
+[tool.uv.sources]
+lumira-shared = { workspace = true }
+
+[build-system]
+requires = ["uv_build>=0.12.18,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["--import-mode=importlib", "-ra"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"

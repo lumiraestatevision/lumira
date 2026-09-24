@@ -1,0 +1,48 @@
+# --- Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+dist/
+build/
+
+# --- Umgebung / Geheimnisse
+.env
+.env.*
+!.env.example
+
+# --- Node / Frontend
+node_modules/
+frontend/.next/
+frontend/out/
+*.tsbuildinfo
+.pnpm-store/
+
+# --- Modellgewichte, Caches, lokale Artefakte
+# (nur Top-Level und Service-Ebene – lumira_shared/models/ ist Code und bleibt versioniert)
+/models/
+/services/*/models/
+*.pt
+*.pth
+*.onnx
+.cache/
+tmp/
+
+# --- 3D / Unreal
+*.blend1
+*.blend2
+services/unreal/**/Saved/
+services/unreal/**/Intermediate/
+services/unreal/**/DerivedDataCache/
+
+# --- Editor / OS
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
