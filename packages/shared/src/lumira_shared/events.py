@@ -55,7 +55,8 @@ class Artifact(StrEnum):
     FLOOR_PLAN_SOURCE = "floor_plan_source"  # hochgeladener Grundriss (PDF/DWG/DXF)
     BLV_SOURCE = "blv_source"  # hochgeladenes Leistungsverzeichnis (PDF), optional
     REFERENCE_IMAGES = "reference_images"  # S3-Präfix mit Beispiel-/Bestandsfotos, optional
-    PARSED_PLAN = "parsed_plan"  # Rohgeometrie + Seitenbilder (JSON)
+    PARSED_PLAN = "parsed_plan"  # ParsedPlan: Rohgeometrie + Texte (JSON)
+    PLAN_PAGE_IMAGE = "plan_page_image"  # gerenderte Planseite (PNG), nur bei PDF
     RECOGNIZED_PLAN = "recognized_plan"  # FloorPlan mit Wänden/Öffnungen/Räumen
     CLASSIFIED_PLAN = "classified_plan"  # FloorPlan mit Raumtypen
     BLV_RESULT = "blv_result"  # BLVResult (JSON)

@@ -3,24 +3,20 @@ name = "lumira-classifier"
 version = "0.1.0"
 description = "Lumira Classifier: Raumtypen klassifizieren, deutsches Label-Mapping (Port 8003)"
 requires-python = ">=3.12,<3.13"
+# Kein EasyOCR/torch: Die Texterkennung passiert bereits im recognizer (ein OCR-Modell im
+# System statt zwei). Der classifier arbeitet auf erkannten Labels und Raumgeometrie.
 dependencies = [
   "lumira-shared",
-  "easyocr>=1.7.2",
   "scikit-learn>=1.6",
+  "numpy>=2.0",
 ]
-
-# EasyOCR zieht torch nach. Die Variante wird wie beim recognizer über ein Extra gewählt,
-# damit das classifier-Image die schlanken CPU-Wheels bekommt.
-[project.optional-dependencies]
-cpu = ["torch>=2.8", "torchvision>=0.23"]
-cu130 = ["torch>=2.8", "torchvision>=0.23"]
 
 [dependency-groups]
 dev = [
   "pytest>=8.3",
   "pytest-asyncio>=1.0",
   "pytest-cov>=6.0",
-  "httpx>=0.28",
+  "httpx2>=2.13",
   "fakeredis>=2.30",
   "moto[s3]>=5.1",
   "ruff>=0.12",
@@ -29,14 +25,6 @@ dev = [
 
 [tool.uv.sources]
 lumira-shared = { workspace = true }
-torch = [
-  { index = "pytorch-cpu", extra = "cpu" },
-  { index = "pytorch-cu130", extra = "cu130" },
-]
-torchvision = [
-  { index = "pytorch-cpu", extra = "cpu" },
-  { index = "pytorch-cu130", extra = "cu130" },
-]
 
 [build-system]
 requires = ["uv_build>=0.12.18,<0.13.0"]

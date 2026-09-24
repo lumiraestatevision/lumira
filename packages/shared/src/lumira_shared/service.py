@@ -51,6 +51,7 @@ class ServiceContext:
 
 ContextHandler = Callable[[Event, ServiceContext], Awaitable[HandlerResult]]
 LifespanHook = Callable[[FastAPI, ServiceContext], AbstractAsyncContextManager[None]]
+ReadinessCheck = Callable[[], Awaitable[bool]]
 
 
 class HealthResponse(BaseModel):
@@ -69,6 +70,7 @@ def create_service_app(
     *,
     handlers: Mapping[EventType, ContextHandler] | None = None,
     lifespan_hook: LifespanHook | None = None,
+    readiness_checks: Mapping[str, ReadinessCheck] | None = None,
     redis: Redis | None = None,
     storage: S3Storage | None = None,
     description: str = "",
@@ -76,7 +78,8 @@ def create_service_app(
     """Baut die FastAPI-App eines Services.
 
     ``redis`` und ``storage`` lassen sich für Tests injizieren; sonst entstehen sie aus den
-    Settings. ``lifespan_hook`` erlaubt zusätzliche Ressourcen (z. B. die DB im backend).
+    Settings. ``lifespan_hook`` erlaubt zusätzliche Ressourcen (z. B. die DB im backend),
+    ``readiness_checks`` zusätzliche Prüfungen für ``/health/ready`` (z. B. Datenbank).
     """
     configure_logging(settings.service_name, level=settings.log_level, json_logs=settings.log_json)
 
@@ -140,7 +143,7 @@ def create_service_app(
         description=description,
         lifespan=lifespan,
     )
-    app.include_router(_health_router(settings))
+    app.include_router(_health_router(settings, dict(readiness_checks or {})))
     return app
 
 
@@ -156,7 +159,9 @@ def _bind(handler: ContextHandler, ctx: ServiceContext) -> EventHandler:
     return bound
 
 
-def _health_router(settings: BaseServiceSettings) -> APIRouter:
+def _health_router(
+    settings: BaseServiceSettings, extra_checks: dict[str, ReadinessCheck]
+) -> APIRouter:
     router = APIRouter(tags=["health"])
 
     @router.get("/health")
@@ -169,6 +174,8 @@ def _health_router(settings: BaseServiceSettings) -> APIRouter:
         """Readiness: Redis erreichbar und – falls vorhanden – Consumer aktiv."""
         ctx: ServiceContext = request.app.state.ctx
         checks: dict[str, bool] = {"redis": await _redis_ok(ctx.redis)}
+        for name, check in extra_checks.items():
+            checks[name] = await _check_ok(check)
         task: asyncio.Task[None] | None = request.app.state.consumer_task
         if task is not None:
             checks["consumer"] = not task.done()
@@ -178,6 +185,14 @@ def _health_router(settings: BaseServiceSettings) -> APIRouter:
         return ReadinessResponse(status="ready" if ok else "not_ready", checks=checks)
 
     return router
+
+
+async def _check_ok(check: ReadinessCheck) -> bool:
+    try:
+        return await check()
+    except Exception:
+        log.warning("health.check_failed", exc_info=True)
+        return False
 
 
 async def _redis_ok(redis: Redis) -> bool:

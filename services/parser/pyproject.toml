@@ -6,20 +6,22 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
   "lumira-shared",
   "ezdxf>=1.4",
-  "pymupdf>=1.26",
   "pdfplumber>=0.11",
-  "pdf2image>=1.17", # benötigt poppler-utils im System (Dockerfile)
+  "pypdfium2>=4.30",
   "pillow>=11.0",
 ]
+# Nur permissive Lizenzen: pdfplumber (MIT) für Vektoren/Text, pypdfium2 (Apache-2.0/BSD-3)
+# zum Rendern. Kein PyMuPDF (AGPL-3.0), kein pdf2image/poppler (Systemabhängigkeit, GPL).
 
 [dependency-groups]
 dev = [
   "pytest>=8.3",
   "pytest-asyncio>=1.0",
   "pytest-cov>=6.0",
-  "httpx>=0.28",
+  "httpx2>=2.13",
   "fakeredis>=2.30",
   "moto[s3]>=5.1",
+  "pypdf>=5.0",
   "ruff>=0.12",
   "pyright>=1.1.400",
 ]

@@ -7,25 +7,12 @@
 [tool.uv]
 required-version = ">=0.12"
 
-# PyTorch-Varianten: recognizer und classifier bieten je die Extras "cpu" und "cu130".
-# CPU- und CUDA-Wheels stammen aus unterschiedlichen Indizes und dürfen nie gemeinsam
-# in einer Umgebung landen – auch nicht über Paketgrenzen hinweg.
+# PyTorch-Varianten des recognizers: Extras "cpu" und "cu130". CPU- und CUDA-Wheels
+# stammen aus unterschiedlichen Indizes und dürfen nie gemeinsam installiert werden.
 conflicts = [
   [
     { package = "lumira-recognizer", extra = "cpu" },
     { package = "lumira-recognizer", extra = "cu130" },
-  ],
-  [
-    { package = "lumira-classifier", extra = "cpu" },
-    { package = "lumira-classifier", extra = "cu130" },
-  ],
-  [
-    { package = "lumira-recognizer", extra = "cpu" },
-    { package = "lumira-classifier", extra = "cu130" },
-  ],
-  [
-    { package = "lumira-recognizer", extra = "cu130" },
-    { package = "lumira-classifier", extra = "cpu" },
   ],
 ]
 
@@ -52,9 +39,8 @@ dev = [
   "pyright>=1.1.400",
   "pytest>=8.3",
   "pytest-asyncio>=1.0",
-  "httpx>=0.28",
+  "httpx2>=2.13",
   "ezdxf>=1.4",
-  "pymupdf>=1.26",
 ]
 
 # --------------------------------------------------------------------------- ruff

@@ -16,7 +16,18 @@ from typing import Any
 import structlog
 from structlog.typing import EventDict, Processor
 
-_NOISY_LOGGERS = ("botocore", "boto3", "urllib3", "s3transfer", "PIL", "multipart")
+_NOISY_LOGGERS = (
+    "botocore",
+    "boto3",
+    "urllib3",
+    "s3transfer",
+    "PIL",
+    "multipart",
+    "ezdxf",
+    "pdfminer",
+    "httpx",
+    "httpx2",
+)
 
 
 def _add_service(service_name: str) -> Processor:
