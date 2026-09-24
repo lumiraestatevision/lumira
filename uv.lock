@@ -833,7 +833,7 @@ requires-dist = [
     { name = "asyncpg", specifier = ">=0.30" },
     { name = "lumira-shared", editable = "packages/shared" },
     { name = "python-multipart", specifier = ">=0.0.20" },
-    { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.40" },
+    { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.54" },
 ]
 
 [package.metadata.requires-dev]

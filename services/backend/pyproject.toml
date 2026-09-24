@@ -5,7 +5,7 @@ description = "Lumira API Gateway: Projekte, Uploads, Pipeline-Status (Port 8000
 requires-python = ">=3.12,<3.13"
 dependencies = [
   "lumira-shared",
-  "sqlalchemy[asyncio]>=2.0.40",
+  "sqlalchemy[asyncio]>=2.0.54",
   "asyncpg>=0.30",
   "alembic>=1.16",
   "python-multipart>=0.0.20",
