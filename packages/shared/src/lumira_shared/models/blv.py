@@ -24,7 +24,19 @@ class MaterialCategory(StrEnum):
     WINDOW = "window"
     KITCHEN = "kitchen"
     LIGHTING = "lighting"
+    STAIRS = "stairs"  # Treppen (Stufen, Geländer)
     OTHER = "other"
+
+
+class ColorSource(StrEnum):
+    RAL = "ral"  # RAL-Code im Dokument → exakter Tabellenwert
+    DOCUMENT = "document"  # eindeutige Farbangabe im Dokument
+    ASSUMED = "assumed"  # Annahme aus Farb-/Materialwort oder Kategorie (keine Farbangabe)
+
+
+class MaterialLocation(StrEnum):
+    INTERIOR = "interior"  # in der Wohnung sichtbar
+    EXTERIOR = "exterior"  # Fassade, Sockel, Dach, Balkon-/Terrassenbelag, Außenfensterbank
 
 
 class Material(LumiraModel):
@@ -35,10 +47,18 @@ class Material(LumiraModel):
     product: str | None = None
     color: str | None = Field(default=None, description="Farbangabe aus dem BLV, z. B. 'Anthrazit'")
     color_hex: str | None = Field(default=None, pattern=r"^#[0-9A-Fa-f]{6}$")
+    color_source: ColorSource | None = Field(
+        default=None, description="Herkunft von color_hex – 'assumed' = Annahme, nicht aus dem LV"
+    )
     finish: str | None = Field(default=None, description="z. B. matt, geölt, poliert")
     format: str | None = Field(default=None, description="z. B. '60x60 cm'")
     room_types: list[RoomType] = Field(
         default_factory=list, description="Leer = gilt für alle Räume"
+    )
+    location: MaterialLocation = MaterialLocation.INTERIOR
+    is_final_surface: bool = Field(
+        default=True,
+        description="Sichtbare Endoberfläche; False z. B. für Estrich/Unterboden unter späterem Belag",
     )
     blv_position: str | None = Field(default=None, description="Pos.-Nr., z. B. '02.03.0010'")
     source_excerpt: str | None = Field(
@@ -49,6 +69,11 @@ class Material(LumiraModel):
 
     def applies_to(self, room_type: RoomType) -> bool:
         return not self.room_types or room_type in self.room_types
+
+    @property
+    def is_visible_inside(self) -> bool:
+        """Relevant für das Innenraum-Modell: innen und sichtbare Endoberfläche."""
+        return self.location is MaterialLocation.INTERIOR and self.is_final_surface
 
 
 class EquipmentVariant(LumiraModel):

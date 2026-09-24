@@ -1,0 +1,66 @@
+# pre-commit – läuft bei jedem `git commit` (Installation: `make setup`).
+#
+# ruff und pyright laufen bewusst als lokale Hooks über `uv run`: So nutzen pre-commit,
+# `make lint`/`make typecheck` und die CI exakt dieselben Versionen aus uv.lock.
+# Manuell über alle Dateien:  uv run pre-commit run --all-files
+
+default_install_hook_types: [pre-commit]
+fail_fast: false
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: \.md$
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: check-yaml
+        args: [--allow-multiple-documents]
+      - id: check-toml
+      - id: check-json
+        exclude: ^frontend/tsconfig\.json$  # enthält Kommentare (JSONC)
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=1024]
+      - id: detect-private-key
+      # Später mit Pull-Request-Workflow ergänzen:
+      # - id: no-commit-to-branch
+      #   args: [--branch, main]
+
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff (lint)
+        entry: uv run --no-sync ruff check --fix --force-exclude
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
+
+      - id: ruff-format
+        name: ruff (format)
+        entry: uv run --no-sync ruff format --force-exclude
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
+
+      - id: pyright
+        name: pyright (typecheck)
+        entry: uv run --no-sync pyright
+        language: system
+        types: [python]
+        pass_filenames: false  # Typprüfung braucht den ganzen Workspace-Kontext
+
+      - id: uv-lock
+        name: uv.lock aktuell
+        entry: uv lock --check
+        language: system
+        files: (^|/)(pyproject\.toml|uv\.lock)$
+        pass_filenames: false
+
+      - id: env-file
+        name: keine .env committen
+        entry: .env darf nicht committet werden – nur .env.example
+        language: fail
+        files: (^|/)\.env$

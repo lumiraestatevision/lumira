@@ -102,4 +102,7 @@ testpaths = ["tests"]
 addopts = ["--import-mode=importlib", "-ra"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
-markers = ["integration: benötigt den laufenden Docker-Compose-Stack"]
+markers = [
+  "integration: benötigt den laufenden Docker-Compose-Stack (make up)",
+  "llm: ruft einen echten LLM-Anbieter auf (nur mit LUMIRA_TEST_LLM=1)",
+]

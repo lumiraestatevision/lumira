@@ -26,6 +26,9 @@ class BLVSettings(BaseServiceSettings):
 
     gemini_api_key: SecretStr | None = None
     blv_gemini_model: str = "gemini-3.8-flash"
+    # Bei Überlastung (503), erschöpftem Kontingent (429) oder nicht freigeschaltetem Modell (404)
+    # werden diese Modelle der Reihe nach versucht (kommagetrennt, leer = kein Ausweichen).
+    blv_gemini_fallback_models: str = "gemini-3.5-flash,gemini-3.5-flash-lite"
 
     blv_max_pdf_mb: int = 30  # Claude: 32 MB, Gemini: 50 MB pro Anfrage
     blv_max_pages: int = 300
@@ -47,6 +50,11 @@ class BLVSettings(BaseServiceSettings):
     @property
     def model(self) -> str:
         return self.blv_model if self.blv_provider == "anthropic" else self.blv_gemini_model
+
+    @property
+    def gemini_models(self) -> list[str]:
+        fallbacks = [m.strip() for m in self.blv_gemini_fallback_models.split(",") if m.strip()]
+        return list(dict.fromkeys([self.blv_gemini_model, *fallbacks]))
 
     @property
     def use_llm(self) -> bool:

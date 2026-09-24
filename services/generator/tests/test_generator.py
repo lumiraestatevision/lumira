@@ -15,6 +15,7 @@ from lumira_shared.models import (
     FloorPlan,
     Material,
     MaterialCategory,
+    MaterialLocation,
     Opening,
     OpeningType,
     Point2D,
@@ -95,6 +96,55 @@ def test_scene_materials_follow_blv() -> None:
     assert wall["openings"] == [
         {"id": "o1", "type": "door", "offset": 500.0, "width": 885.0, "height": 2010.0, "sill": 0.0}
     ]
+
+
+def test_only_visible_interior_surfaces_are_used() -> None:
+    """Die Fehler aus der ersten echten LV-Auswertung dürfen nicht im Modell landen."""
+    plan = _plan()
+    tiles, floor, wall = (
+        MaterialCategory.TILES,
+        MaterialCategory.FLOORING,
+        MaterialCategory.WALL_FINISH,
+    )
+    materials = [
+        Material(
+            id="fassade",
+            category=wall,
+            name="Kratzputz",
+            color_hex="#EEEEEE",
+            location=MaterialLocation.EXTERIOR,
+        ),
+        Material(id="innen", category=wall, name="Raufaser weiß", color_hex="#F1EDE1"),
+        Material(id="estrich", category=floor, name="Trockenestrich", is_final_surface=False),
+        Material(
+            id="vinyl",
+            category=floor,
+            name="Klickvinyl",
+            color_hex="#A0825A",
+            room_types=[RoomType.HALLWAY],
+        ),
+        Material(
+            id="wandfliese", category=tiles, name="Wandfliesen Bad", room_types=[RoomType.BATHROOM]
+        ),
+        Material(
+            id="bodenfliese",
+            category=tiles,
+            name="Bodenfliesen 60x60",
+            room_types=[RoomType.BATHROOM],
+        ),
+    ]
+    blv = BLVResult(
+        project_id=plan.project_id,
+        materials=materials,
+        variants=[EquipmentVariant(name="Standard", material_ids=[m.id for m in materials])],
+    )
+
+    scene = build_scene(plan, blv)
+
+    floors = {r["id"]: r["floor"]["name"] for r in scene["rooms"]}
+    assert floors["bad"] == "Bodenfliesen 60x60"  # nicht die Wandfliese
+    assert floors["flur"] == "Klickvinyl"  # nicht der Estrich darunter
+    assert scene["wall_finish"]["name"] == "Raufaser weiß"  # nicht der Fassadenputz
 
 
 def _fake_blender(tmp_path: Path, body: str) -> str:

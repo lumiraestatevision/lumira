@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import io
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from typing import Any
 
 import pytest
@@ -31,8 +31,10 @@ from lumira_shared import (
     get_logger,
     project_created,
 )
-from lumira_shared.models import BLVResult, MaterialCategory, RoomType
+from lumira_shared.models import BLVResult, ColorSource, MaterialCategory, RoomType
 from lumira_shared.testing import PdfPage, simple_pdf
+
+MaterialFactory = Callable[..., ExtractedMaterial]  # Fixture make_material aus conftest.py
 
 
 def _settings(**overrides: Any) -> BLVSettings:
@@ -44,34 +46,18 @@ def _pdf(pages: int = 1) -> bytes:
     return simple_pdf([page] * pages)
 
 
-def _extraction() -> BLVExtraction:
-    def material(id_: str, **kw: Any) -> ExtractedMaterial:
-        base: dict[str, Any] = {
-            "id": id_,
-            "category": MaterialCategory.FLOORING,
-            "name": "Parkett",
-            "manufacturer": None,
-            "product": None,
-            "color": None,
-            "color_hex": None,
-            "finish": None,
-            "format": None,
-            "room_types": [],
-            "blv_position": None,
-            "source_excerpt": None,
-        }
-        return ExtractedMaterial(**(base | kw))
-
+@pytest.fixture
+def extraction(make_material: MaterialFactory) -> BLVExtraction:
     return BLVExtraction(
         materials=[
-            material("m1", color_hex="#AABBCC", blv_position="02.03.0010"),
-            material(
+            make_material("m1", color_hex="#AABBCC", blv_position="02.03.0010"),
+            make_material(
                 "m2",
                 category=MaterialCategory.TILES,
                 color_hex="weiß",
                 room_types=[RoomType.BATHROOM],
             ),
-            material("m1"),  # doppelt
+            make_material("m1"),  # doppelt
         ],
         variants=[
             ExtractedVariant(
@@ -120,18 +106,20 @@ def test_provider_selects_key_and_model() -> None:
 
 
 # ------------------------------------------------------------------ Extraktion → BLVResult
-def test_extraction_is_sanitised() -> None:
+def test_extraction_is_sanitised(extraction: BLVExtraction) -> None:
     result = to_blv_result(
-        _extraction(), project_id=uuid.uuid4(), source_key="lv.pdf", extracted_by="claude-opus-5"
+        extraction, project_id=uuid.uuid4(), source_key="lv.pdf", extracted_by="claude-opus-5"
     )
 
     assert [m.id for m in result.materials] == ["m1", "m2"]
     assert result.materials[0].color_hex == "#AABBCC"
-    assert result.materials[1].color_hex is None  # "weiß" ist kein Hex-Wert
+    # "weiß" ist kein Hex-Wert → Annahme aus dem Materialwort, als solche gekennzeichnet
+    assert result.materials[1].color_source is ColorSource.ASSUMED
     standard, premium = result.variants
     assert standard.material_ids == ["m1", "m2"]  # m9 entfernt
     assert standard.is_default
     assert not premium.is_default  # nur eine Standardvariante
+    assert premium.material_ids == ["m1", "m2"]  # Fliese m2 aus Standard übernommen
     assert str(premium.surcharge_eur) == "4500.0"
     assert any("m9" in n for n in result.notes)
     assert any("Doppelte" in n for n in result.notes)
@@ -223,19 +211,24 @@ async def test_without_key_blv_is_not_sent_to_llm(
 
 
 @pytest.mark.parametrize(
-    ("settings", "module", "function", "expected_call"),
+    ("settings", "module", "function", "expected_call", "used_model"),
     [
         (
             {"anthropic_api_key": "sk-test"},
             claude,
             "extract_with_claude",
             {"api_key": "sk-test", "model": "claude-opus-5", "use_fallbacks": True},
+            "claude-opus-5",
         ),
         (
             {"blv_provider": "gemini", "gemini_api_key": "g-test"},
             gemini,
             "extract_with_gemini",
-            {"api_key": "g-test", "model": "gemini-3.8-flash"},
+            {
+                "api_key": "g-test",
+                "models": ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite"],
+            },
+            "gemini-3.5-flash",  # z. B. nach Ausweichen wegen Überlastung
         ),
     ],
     ids=["anthropic", "gemini"],
@@ -247,13 +240,15 @@ async def test_llm_path(
     module: Any,
     function: str,
     expected_call: dict[str, Any],
+    used_model: str,
+    extraction: BLVExtraction,
 ) -> None:
     ctx = await _ctx(storage, _settings(**settings))
     calls: list[dict[str, Any]] = []
 
-    async def fake_extract(pdf: bytes, **kwargs: Any) -> BLVExtraction:
+    async def fake_extract(pdf: bytes, **kwargs: Any) -> Any:
         calls.append({"pdf": pdf[:5], **kwargs})
-        return _extraction()
+        return extraction if module is claude else (extraction, used_model)
 
     monkeypatch.setattr(module, function, fake_extract)
     event = _classified("projects/x/upload/blv.pdf")
@@ -263,7 +258,7 @@ async def test_llm_path(
 
     assert calls == [{"pdf": b"%PDF-", **expected_call}]
     assert result_event.data == {
-        "extracted_by": expected_call["model"],
+        "extracted_by": used_model,
         "materials": 2,
         "variants": ["Standard", "Premium"],
     }

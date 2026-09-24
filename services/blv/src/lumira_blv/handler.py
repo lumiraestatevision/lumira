@@ -59,12 +59,12 @@ async def evaluate(event: Event, ctx: ServiceContext) -> BLVResult:
     pdf = await ctx.storage.get_bytes(source_key)
     pages = check_pdf(pdf, settings)
     ctx.log.info("blv.llm_start", provider=settings.blv_provider, model=settings.model, pages=pages)
-    extraction = await llm.extract(pdf, settings)
+    extraction, used_model = await llm.extract(pdf, settings)
     return to_blv_result(
         extraction,
         project_id=event.project_id,
         source_key=source_key,
-        extracted_by=settings.model,
+        extracted_by=used_model,
     )
 
 

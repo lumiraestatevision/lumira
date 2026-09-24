@@ -8,32 +8,46 @@ from __future__ import annotations
 
 from typing import Any
 
-from lumira_shared.models import BLVResult, FloorPlan, MaterialCategory, RoomType
+from lumira_shared.models import BLVResult, FloorPlan, Material, MaterialCategory, RoomType
 
 FALLBACK_FLOOR = {"name": "Estrich", "color": "#9E9A93"}
 FALLBACK_WALL = {"name": "Wandfarbe weiß", "color": "#F1ECE1"}
 _FLOOR_CATEGORIES = (MaterialCategory.FLOORING, MaterialCategory.TILES)
 
 
+def _floor_score(material: Material, room_type: RoomType) -> tuple[int, ...]:
+    """Kleiner = besser. Nassräume bevorzugen Fliesen; Bodenfliesen vor Wandfliesen."""
+    name = material.name.lower()
+    wet = room_type in (RoomType.BATHROOM, RoomType.WC)
+    return (
+        0 if (material.category is MaterialCategory.TILES) == wet else 1,
+        0 if "boden" in name else (2 if "wand" in name else 1),
+        0 if material.room_types else 1,  # raumgenaue Angabe vor „gilt überall“
+    )
+
+
 def _floor_for(blv: BLVResult, room_type: RoomType, variant: str | None) -> dict[str, str]:
     candidates = [
         m
         for m in blv.materials_for(variant=variant, room_type=room_type)
-        if m.category in _FLOOR_CATEGORIES
+        if m.category in _FLOOR_CATEGORIES and m.is_visible_inside
     ]
-    if room_type in (RoomType.BATHROOM, RoomType.WC):
-        candidates.sort(key=lambda m: m.category is not MaterialCategory.TILES)  # Fliesen zuerst
     if not candidates:
         return FALLBACK_FLOOR
-    material = candidates[0]
+    material = min(candidates, key=lambda m: _floor_score(m, room_type))
     return {"name": material.name, "color": material.color_hex or FALLBACK_FLOOR["color"]}
 
 
 def _wall_finish(blv: BLVResult, variant: str | None) -> dict[str, str]:
-    for material in blv.materials_for(variant=variant):
-        if material.category is MaterialCategory.WALL_FINISH:
-            return {"name": material.name, "color": material.color_hex or FALLBACK_WALL["color"]}
-    return FALLBACK_WALL
+    finishes = [
+        m
+        for m in blv.materials_for(variant=variant)
+        if m.category is MaterialCategory.WALL_FINISH and m.is_visible_inside
+    ]
+    if not finishes:
+        return FALLBACK_WALL
+    material = min(finishes, key=lambda m: 0 if not m.room_types else 1)  # Wohnräume-weit zuerst
+    return {"name": material.name, "color": material.color_hex or FALLBACK_WALL["color"]}
 
 
 def build_scene(plan: FloorPlan, blv: BLVResult, *, variant: str | None = None) -> dict[str, Any]:

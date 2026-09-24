@@ -288,6 +288,7 @@ services:
       BLV_LLM_FALLBACKS: ${BLV_LLM_FALLBACKS:-true}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       BLV_GEMINI_MODEL: ${BLV_GEMINI_MODEL:-gemini-3.8-flash}
+      BLV_GEMINI_FALLBACK_MODELS: ${BLV_GEMINI_FALLBACK_MODELS:-gemini-3.5-flash,gemini-3.5-flash-lite}
     ports:
       - "127.0.0.1:8004:8004"
     volumes:

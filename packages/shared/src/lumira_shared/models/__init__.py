@@ -1,7 +1,14 @@
 """Gemeinsame Pydantic-v2-Datenmodelle."""
 
 from lumira_shared.models.base import LumiraModel, new_id
-from lumira_shared.models.blv import BLVResult, EquipmentVariant, Material, MaterialCategory
+from lumira_shared.models.blv import (
+    BLVResult,
+    ColorSource,
+    EquipmentVariant,
+    Material,
+    MaterialCategory,
+    MaterialLocation,
+)
 from lumira_shared.models.floorplan import (
     DEFAULT_WALL_HEIGHT_MM,
     DoorSwing,
@@ -19,6 +26,7 @@ from lumira_shared.models.parsed import ParsedPlan, Segment, TextItem
 __all__ = [
     "DEFAULT_WALL_HEIGHT_MM",
     "BLVResult",
+    "ColorSource",
     "Confidence",
     "DoorSwing",
     "EquipmentVariant",
@@ -26,6 +34,7 @@ __all__ = [
     "LumiraModel",
     "Material",
     "MaterialCategory",
+    "MaterialLocation",
     "Opening",
     "OpeningType",
     "ParsedPlan",
