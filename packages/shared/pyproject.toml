@@ -21,7 +21,7 @@ dev = [
   "httpx2>=2.13",
   "fakeredis>=2.30",
   "moto[s3]>=5.1",
-  "types-boto3[s3]>=1.40",
+  "types-boto3[s3]>=1.43.99",
   "ruff>=0.12",
   "pyright>=1.1.400",
 ]
