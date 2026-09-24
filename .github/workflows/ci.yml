@@ -1,0 +1,35 @@
+# Repo-weite Prüfung: dieselben pre-commit-Hooks wie beim lokalen `git commit`
+# (ruff, pyright über den ganzen Workspace, uv.lock, Dateihygiene, keine Secrets).
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  pre-commit:
+    name: pre-commit (alle Hooks)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+        with:
+          version: "0.12.18"
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          cache-suffix: all
+      - name: Alle Pakete installieren
+        run: make sync
+      - name: pre-commit run --all-files
+        run: uv run --no-sync pre-commit run --all-files --show-diff-on-failure --color always

@@ -1,0 +1,41 @@
+# Leistungsverzeichnis per LLM (Port 8004) – ruft den gemeinsamen Workflow _python-service.yml auf.
+name: blv
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+    paths:
+      - "services/blv/**"
+      - "packages/shared/**"
+      - "uv.lock"
+      - "pyproject.toml"
+      - "Makefile"
+      - ".github/workflows/_python-service.yml"
+      - ".github/workflows/service-blv.yml"
+  pull_request:
+    paths:
+      - "services/blv/**"
+      - "packages/shared/**"
+      - "uv.lock"
+      - "pyproject.toml"
+      - "Makefile"
+      - ".github/workflows/_python-service.yml"
+      - ".github/workflows/service-blv.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  service:
+    uses: ./.github/workflows/_python-service.yml
+    permissions:
+      contents: read
+      packages: write
+    with:
+      service: blv

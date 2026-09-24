@@ -12,6 +12,14 @@ ALL_PROFILES := --profile cpu --profile gpu --profile vr
 PACKAGES  := packages/shared $(wildcard services/*)
 SERVICE   ?=
 TORCH     ?= cpu
+PYTEST_ARGS ?= -v
+
+# SERVICE=parser → services/parser, Paket lumira-parser; SERVICE=shared → packages/shared
+SERVICE_DIR    = $(if $(filter shared,$(SERVICE)),packages/shared,services/$(SERVICE))
+SERVICE_PKG    = lumira-$(SERVICE)
+SERVICE_EXTRAS = $(if $(filter recognizer,$(SERVICE)),--extra $(TORCH),)
+require-service = @test -n "$(SERVICE)" -a -d "$(SERVICE_DIR)" \
+  || { echo "✘ Aufruf mit SERVICE=<name> (shared, backend, parser, …); unbekannt: '$(SERVICE)'"; exit 1; }
 
 # Images einzeln bauen: parallele Exporte großer Images lassen BuildKit gelegentlich scheitern.
 BUILD_ORDER := backend parser classifier blv unreal generator frontend
@@ -23,11 +31,15 @@ help: ## Diese Übersicht
 # ------------------------------------------------------------------ Einrichtung
 .PHONY: setup
 setup: check-tools .env ## Einmalig: Python-Umgebung, pre-commit, Frontend, Docker-Images
-	uv sync --locked --all-packages --extra $(TORCH)
+	$(MAKE) --no-print-directory sync
 	uv run --no-sync pre-commit install
 	pnpm --dir frontend install --frozen-lockfile
 	$(MAKE) --no-print-directory build
 	@echo -e "\n✔ Setup fertig. Weiter mit: make up"
+
+.PHONY: sync
+sync: ## Python-Umgebung mit ALLEN Paketen aktualisieren (nach git pull)
+	uv sync --locked --all-packages --extra $(TORCH)
 
 .PHONY: check-tools
 check-tools:
@@ -108,12 +120,39 @@ test: ## Unit-Tests aller Pakete (ohne laufenden Stack)
 	if [ -n "$$failed" ]; then echo -e "\n✘ Fehlgeschlagen:$$failed"; exit 1; fi; \
 	echo -e "\n✔ Alle Pakete grün"
 
+# ------------------------------------------------------------------ Einzelner Service (CI-Jobs je Service)
+.PHONY: sync-service
+sync-service: ## NUR dieses Paket installieren (CI; lokal danach wieder `make sync`)
+	$(require-service)
+	uv sync --locked --package $(SERVICE_PKG) $(SERVICE_EXTRAS)
+
+.PHONY: lint-service
+lint-service: ## Lint + Format eines Pakets: make lint-service SERVICE=parser
+	$(require-service)
+	uv run --no-sync ruff check $(SERVICE_DIR)
+	uv run --no-sync ruff format --check $(SERVICE_DIR)
+
+.PHONY: typecheck-service
+typecheck-service: ## Typprüfung eines Pakets: make typecheck-service SERVICE=parser
+	$(require-service)
+	uv run --no-sync pyright $(SERVICE_DIR)
+
 .PHONY: test-service
 test-service: ## Tests eines Pakets: make test-service SERVICE=parser (oder shared)
-	@test -n "$(SERVICE)" || { echo "Aufruf: make test-service SERVICE=<name>"; exit 1; }
-	@dir=services/$(SERVICE); [ "$(SERVICE)" = "shared" ] && dir=packages/shared; \
-	test -d "$$dir" || { echo "✘ Unbekanntes Paket: $(SERVICE)"; exit 1; }; \
-	cd "$$dir" && uv run --no-sync pytest -v
+	$(require-service)
+	cd $(SERVICE_DIR) && uv run --no-sync pytest $(PYTEST_ARGS)
+
+.PHONY: check-service
+check-service: lint-service typecheck-service test-service ## lint + typecheck + test eines Pakets
+
+.PHONY: migration-check
+migration-check: ## Alembic-Prüfung wie in der CI – LÖSCHT die Tabellen (lokal nur mit FORCE=1)
+	@[ "$${CI:-}" = "true" ] || [ "$${FORCE:-}" = "1" ] \
+	  || { echo "✘ downgrade base löscht alle Projektdaten – lokal nur mit FORCE=1"; exit 1; }
+	cd services/backend && uv run --no-sync alembic upgrade head
+	cd services/backend && uv run --no-sync alembic check
+	cd services/backend && uv run --no-sync alembic downgrade base
+	cd services/backend && uv run --no-sync alembic upgrade head
 
 .PHONY: test-integration
 test-integration: ## Ende-zu-Ende-Test gegen den laufenden Stack (vorher: make up)

@@ -1,0 +1,41 @@
+# VR-Export, lokal Stub (Port 8006) – ruft den gemeinsamen Workflow _python-service.yml auf.
+name: unreal
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+    paths:
+      - "services/unreal/**"
+      - "packages/shared/**"
+      - "uv.lock"
+      - "pyproject.toml"
+      - "Makefile"
+      - ".github/workflows/_python-service.yml"
+      - ".github/workflows/service-unreal.yml"
+  pull_request:
+    paths:
+      - "services/unreal/**"
+      - "packages/shared/**"
+      - "uv.lock"
+      - "pyproject.toml"
+      - "Makefile"
+      - ".github/workflows/_python-service.yml"
+      - ".github/workflows/service-unreal.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  service:
+    uses: ./.github/workflows/_python-service.yml
+    permissions:
+      contents: read
+      packages: write
+    with:
+      service: unreal

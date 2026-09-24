@@ -1,0 +1,167 @@
+# Wiederverwendbarer Workflow für JEDEN Python-Service (und packages/shared).
+# Aufgerufen von den service-*.yml – dort stehen Trigger und servicespezifische Zusatzjobs.
+#
+#   check   make sync-service / lint-service / typecheck-service / test-service
+#           → exakt dieselben Befehle wie lokal
+#   image   Produktions-Image (Target "runtime") bauen, Import-Smoke-Test,
+#           auf main in die GitHub Container Registry (ghcr.io) pushen
+
+name: python-service
+
+on:
+  workflow_call:
+    inputs:
+      service:
+        description: "Name wie im Makefile: shared, backend, parser, …"
+        type: string
+        required: true
+      image:
+        description: "Docker-Image bauen (false z. B. für shared)"
+        type: boolean
+        default: true
+      build-args:
+        description: "Zusätzliche Docker-Build-Argumente, eine Zeile je KEY=VALUE"
+        type: string
+        default: ""
+      image-suffix:
+        description: "Anhang an den Image-Namen, z. B. -cu130"
+        type: string
+        default: ""
+      free-disk-space:
+        description: "Vorinstallierte Toolchains entfernen (für sehr große Images, z. B. CUDA)"
+        type: boolean
+        default: false
+      skip-check:
+        description: "Nur das Image bauen (check lief bereits in einem anderen Aufruf)"
+        type: boolean
+        default: false
+      layer-cache:
+        description: "Docker-Layer im GitHub-Actions-Cache ablegen (max. 10 GB je Repo – für Riesen-Images aus)"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+env:
+  UV_VERSION: "0.12.18"
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  check:
+    name: lint · typecheck · test
+    if: ${{ !inputs.skip-check }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          cache-suffix: ${{ inputs.service }}
+
+      - name: Abhängigkeiten (nur dieses Paket + shared)
+        run: make sync-service SERVICE=${{ inputs.service }}
+
+      - name: Lint
+        run: make lint-service SERVICE=${{ inputs.service }}
+
+      - name: Typecheck
+        run: make typecheck-service SERVICE=${{ inputs.service }}
+
+      - name: Tests
+        run: >-
+          make test-service SERVICE=${{ inputs.service }}
+          PYTEST_ARGS="-v --cov=lumira_${{ inputs.service }} --cov-report=term
+          --cov-report=xml:coverage.xml --junitxml=junit.xml"
+
+      - name: Testergebnisse hochladen
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results-${{ inputs.service }}
+          path: |
+            services/${{ inputs.service }}/junit.xml
+            services/${{ inputs.service }}/coverage.xml
+            packages/${{ inputs.service }}/junit.xml
+            packages/${{ inputs.service }}/coverage.xml
+          if-no-files-found: ignore
+          retention-days: 14
+
+  image:
+    name: image
+    needs: check
+    # always(): läuft auch, wenn check per skip-check übersprungen wurde – aber nie nach einem Fehler.
+    if: ${{ always() && inputs.image && (needs.check.result == 'success' || needs.check.result == 'skipped') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write  # nur für den Push nach ghcr.io
+    env:
+      PUSH: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') }}
+    steps:
+      - name: Speicherplatz freiräumen
+        if: ${{ inputs.free-disk-space }}
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL /usr/share/swift
+          sudo docker image prune --all --force
+          df -h /
+
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Tags und Labels
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/lumira-${{ inputs.service }}${{ inputs.image-suffix }}
+          tags: |
+            type=sha,format=short
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build (Target runtime)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: services/${{ inputs.service }}/Dockerfile
+          target: runtime
+          build-args: ${{ inputs.build-args }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          load: true
+          push: false
+          cache-from: ${{ inputs.layer-cache && format('type=gha,scope={0}{1}', inputs.service, inputs.image-suffix) || '' }}
+          cache-to: ${{ inputs.layer-cache && format('type=gha,mode=max,scope={0}{1}', inputs.service, inputs.image-suffix) || '' }}
+
+      - name: Smoke-Test (Import der App, läuft als Non-Root)
+        env:
+          IMAGE: ${{ fromJSON(steps.meta.outputs.json).tags[0] }}
+        run: |
+          docker run --rm --entrypoint sh "$IMAGE" -c \
+            'test "$(id -u)" != 0 && python -c "import lumira_${{ inputs.service }}.main; print(\"ok\")"'
+
+      - name: Login ghcr.io
+        if: ${{ env.PUSH == 'true' }}
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push
+        if: ${{ env.PUSH == 'true' }}
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          for tag in $TAGS; do docker push "$tag"; done

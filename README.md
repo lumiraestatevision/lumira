@@ -106,6 +106,28 @@ der Service automatisch auf die Modelle in `BLV_GEMINI_FALLBACK_MODELS` aus.
 Beispiel-Grundrisse (DXF, PDF) erzeugt der Code zur Laufzeit (`lumira_parser.samples`).
 Echte Testdokumente gehören nach `testdata/private/` – der Ordner wird nie committet.
 
+## CI/CD (GitHub Actions)
+
+Die CI ruft **dieselben `make`-Befehle** auf wie lokal – was bei dir grün ist, ist es dort auch.
+
+| Workflow | Läuft bei | Was passiert |
+|---|---|---|
+| `_python-service.yml` | (wird aufgerufen) | Gemeinsamer Ablauf je Service: `make sync-service` → `lint-service` → `typecheck-service` → `test-service` (+ Coverage, JUnit) → Produktions-Image bauen, Smoke-Test, auf `main`/Tags nach ghcr.io pushen |
+| `service-<name>.yml` | Änderungen am Service, an `packages/shared`, `uv.lock` | Ruft den gemeinsamen Workflow auf, plus Zusatzjobs: **backend** Alembic gegen echtes PostgreSQL, **generator** echter Blender-Export, **recognizer** GPU-Image (nur manuell/bei Release-Tags, ≈ 9,5 GB) |
+| `frontend.yml` | Änderungen unter `frontend/` | Typecheck, Build, Image |
+| `ci.yml` | jeder Push/PR | Alle pre-commit-Hooks über das ganze Repo (wie beim lokalen Commit) |
+| `e2e.yml` | PR auf `main`, Push auf `main`, wöchentlich | `make build` → `make up` → `make test-integration`; bei Fehlern Compose-Logs als Artefakt |
+
+Einen Service lokal genauso prüfen wie die CI: `make check-service SERVICE=parser`.
+(`make sync-service` installiert bewusst NUR dieses Paket – lokal danach wieder `make sync`.)
+
+**Images** landen als `ghcr.io/<owner>/lumira-<service>` mit den Tags `sha-…`, `main`, `latest`
+und bei Git-Tags `v1.2.3` zusätzlich `1.2.3`. **Dependabot** schlägt wöchentlich gebündelte
+Updates für Actions, Python, npm und Basis-Images vor.
+
+**Deployment** (Rollout der Images auf eine Umgebung) ist noch nicht Teil der Pipeline –
+dafür fehlt bisher die Zielplattform.
+
 ## Was lokal (noch) nicht echt ist
 
 - **Unreal Engine**: nur Stub (schreibt ein Manifest). Echter Betrieb später auf einem GPU-Server.

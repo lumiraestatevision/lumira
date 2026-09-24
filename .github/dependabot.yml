@@ -1,0 +1,42 @@
+# Wöchentliche, gebündelte Update-PRs – jede läuft durch dieselbe CI wie eigene Änderungen.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: uv  # alle Workspace-Pakete über das gemeinsame uv.lock
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      python-minor-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm  # Frontend (pnpm-lock.yaml)
+    directory: /frontend
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      frontend-minor-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: docker  # Basis-Images der Dockerfiles
+    directories:
+      - /services/*
+      - /frontend
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      base-images:
+        patterns: ["*"]

@@ -1,0 +1,80 @@
+# Ende-zu-Ende: kompletter Stack per docker compose (Profil cpu) + Integrationstest.
+# Dieselben Befehle wie lokal: make build → make up → make test-integration.
+# Läuft ohne LLM-Key → blv nutzt die Standardausstattung (deterministisch, kostenlos).
+name: e2e
+
+on:
+  pull_request:
+    branches: [main]
+    paths-ignore: ["**.md", "testdata/**"]
+  push:
+    branches: [main]
+    paths-ignore: ["**.md", "testdata/**"]
+  schedule:
+    # wöchentlich (Mo. nachts): fängt Brüche durch neue Basis-Images/Downloads ab.
+    # Täglich wäre möglich, kostet bei privaten Repos aber ≈ 750 der 2.000 Freiminuten im Monat.
+    - cron: "30 2 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    name: stack + integration tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      COMPOSE_PROFILES: cpu
+      PIPELINE_VR_ENABLED: "false"
+      LOG_JSON: "true"
+    steps:
+      - name: Speicherplatz freiräumen (Images ≈ 8 GB)
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL /usr/share/swift
+          sudo docker image prune --all --force
+          df -h /
+
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10
+        with:
+          version: "0.12.18"
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          cache-suffix: all
+
+      - name: Python-Umgebung (für den Testclient)
+        run: make sync
+
+      - name: Images bauen
+        run: make build
+
+      - name: Stack starten
+        run: make up
+
+      - name: Integrationstests
+        run: make test-integration
+
+      - name: Logs sichern
+        if: ${{ failure() }}
+        run: |
+          docker compose --profile cpu ps -a
+          docker compose --profile cpu logs --no-color --timestamps > compose-logs.txt
+
+      - uses: actions/upload-artifact@v7
+        if: ${{ failure() }}
+        with:
+          name: compose-logs
+          path: compose-logs.txt
+          retention-days: 7
+
+      - name: Stack stoppen
+        if: ${{ always() }}
+        run: make down

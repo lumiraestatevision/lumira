@@ -1,0 +1,73 @@
+# API Gateway (Port 8000) – ruft den gemeinsamen Workflow _python-service.yml auf.
+name: backend
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+    paths:
+      - "services/backend/**"
+      - "packages/shared/**"
+      - "uv.lock"
+      - "pyproject.toml"
+      - "Makefile"
+      - ".github/workflows/_python-service.yml"
+      - ".github/workflows/service-backend.yml"
+  pull_request:
+    paths:
+      - "services/backend/**"
+      - "packages/shared/**"
+      - "uv.lock"
+      - "pyproject.toml"
+      - "Makefile"
+      - ".github/workflows/_python-service.yml"
+      - ".github/workflows/service-backend.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  service:
+    uses: ./.github/workflows/_python-service.yml
+    permissions:
+      contents: read
+      packages: write
+    with:
+      service: backend
+
+  # Servicespezifisch: Alembic-Migrationen gegen ein echtes PostgreSQL (Version wie in compose).
+  migrations:
+    name: alembic
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: lumira
+          POSTGRES_PASSWORD: ci-only
+          POSTGRES_DB: lumira
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U lumira -d lumira"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql+asyncpg://lumira:ci-only@localhost:5432/lumira
+      LOG_JSON: "false"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+        with:
+          version: "0.12.18"
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          cache-suffix: backend
+      - run: make sync-service SERVICE=backend
+      - name: upgrade → check (Modelle == Migrationen) → downgrade → upgrade
+        run: make migration-check
