@@ -10,7 +10,7 @@ dependencies = [
   "boto3>=1.40",
   "structlog>=25.1",
   "fastapi>=0.116",
-  "uvicorn[standard]>=0.35",
+  "uvicorn[standard]>=0.53.0",
 ]
 
 [dependency-groups]
