@@ -49,27 +49,22 @@ async def evaluate(event: Event, ctx: ServiceContext) -> BLVResult:
             source_key=None,
             note="Kein Leistungsverzeichnis hochgeladen – Standardausstattung (STUB)",
         )
-    if not settings.use_llm or settings.api_key is None:
+    if not settings.use_llm:
         return default_result(
             event.project_id,
             source_key=source_key,
-            note="Stub-Modus: LV nicht ausgewertet (kein ANTHROPIC_API_KEY)",
+            note=f"Stub-Modus: LV nicht ausgewertet (kein API-Key für {settings.blv_provider})",
         )
 
     pdf = await ctx.storage.get_bytes(source_key)
     pages = check_pdf(pdf, settings)
-    ctx.log.info("blv.llm_start", model=settings.blv_model, pages=pages)
-    extraction = await llm.extract_with_claude(
-        pdf,
-        api_key=settings.api_key,
-        model=settings.blv_model,
-        use_fallbacks=settings.blv_llm_fallbacks,
-    )
+    ctx.log.info("blv.llm_start", provider=settings.blv_provider, model=settings.model, pages=pages)
+    extraction = await llm.extract(pdf, settings)
     return to_blv_result(
         extraction,
         project_id=event.project_id,
         source_key=source_key,
-        extracted_by=settings.blv_model,
+        extracted_by=settings.model,
     )
 
 

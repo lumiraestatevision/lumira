@@ -13,7 +13,7 @@ from pypdf import PdfReader, PdfWriter
 
 from lumira_blv.config import BLVSettings
 from lumira_blv.handler import check_pdf, handle_rooms_classified
-from lumira_blv.logic import llm
+from lumira_blv.logic import claude, gemini
 from lumira_blv.logic.extraction import (
     BLVExtraction,
     ExtractedMaterial,
@@ -103,10 +103,20 @@ def test_auto_mode_uses_llm_only_with_key() -> None:
 def test_llm_mode_requires_key() -> None:
     with pytest.raises(ValidationError, match="ANTHROPIC_API_KEY"):
         _settings(blv_mode="llm")
+    with pytest.raises(ValidationError, match="GEMINI_API_KEY"):
+        _settings(blv_mode="llm", blv_provider="gemini", anthropic_api_key="sk-test")
 
 
-def test_default_model_is_opus() -> None:
-    assert _settings().blv_model == "claude-opus-5"
+def test_provider_selects_key_and_model() -> None:
+    claude_settings = _settings(anthropic_api_key="sk-a", gemini_api_key="g-key")
+    assert (claude_settings.api_key, claude_settings.model) == ("sk-a", "claude-opus-5")
+    gemini_settings = _settings(
+        blv_provider="gemini", anthropic_api_key="sk-a", gemini_api_key="g-key"
+    )
+    assert (gemini_settings.api_key, gemini_settings.model) == ("g-key", "gemini-3.8-flash")
+    # Key nur für den anderen Anbieter → Stub
+    assert _settings(blv_provider="gemini", anthropic_api_key="sk-a").use_llm is False
+    assert _settings(blv_provider="gemini", gemini_api_key="  ").use_llm is False
 
 
 # ------------------------------------------------------------------ Extraktion → BLVResult
@@ -206,30 +216,54 @@ async def test_without_key_blv_is_not_sent_to_llm(
     async def must_not_be_called(*args: Any, **kwargs: Any) -> BLVExtraction:
         raise AssertionError("LLM darf im Stub-Modus nicht aufgerufen werden")
 
-    monkeypatch.setattr(llm, "extract_with_claude", must_not_be_called)
+    monkeypatch.setattr(claude, "extract_with_claude", must_not_be_called)
+    monkeypatch.setattr(gemini, "extract_with_gemini", must_not_be_called)
     result_event = await handle_rooms_classified(_classified("projects/x/upload/blv.pdf"), stub_ctx)
     assert result_event.data["extracted_by"] == "stub"
 
 
-async def test_llm_path(storage: S3Storage, monkeypatch: pytest.MonkeyPatch) -> None:
-    ctx = await _ctx(storage, _settings(anthropic_api_key="sk-test"))
+@pytest.mark.parametrize(
+    ("settings", "module", "function", "expected_call"),
+    [
+        (
+            {"anthropic_api_key": "sk-test"},
+            claude,
+            "extract_with_claude",
+            {"api_key": "sk-test", "model": "claude-opus-5", "use_fallbacks": True},
+        ),
+        (
+            {"blv_provider": "gemini", "gemini_api_key": "g-test"},
+            gemini,
+            "extract_with_gemini",
+            {"api_key": "g-test", "model": "gemini-3.8-flash"},
+        ),
+    ],
+    ids=["anthropic", "gemini"],
+)
+async def test_llm_path(
+    storage: S3Storage,
+    monkeypatch: pytest.MonkeyPatch,
+    settings: dict[str, Any],
+    module: Any,
+    function: str,
+    expected_call: dict[str, Any],
+) -> None:
+    ctx = await _ctx(storage, _settings(**settings))
     calls: list[dict[str, Any]] = []
 
     async def fake_extract(pdf: bytes, **kwargs: Any) -> BLVExtraction:
         calls.append({"pdf": pdf[:5], **kwargs})
         return _extraction()
 
-    monkeypatch.setattr(llm, "extract_with_claude", fake_extract)
+    monkeypatch.setattr(module, function, fake_extract)
     event = _classified("projects/x/upload/blv.pdf")
     await storage.put_bytes("projects/x/upload/blv.pdf", _pdf())
 
     result_event = await handle_rooms_classified(event, ctx)
 
-    assert calls == [
-        {"pdf": b"%PDF-", "api_key": "sk-test", "model": "claude-opus-5", "use_fallbacks": True}
-    ]
+    assert calls == [{"pdf": b"%PDF-", **expected_call}]
     assert result_event.data == {
-        "extracted_by": "claude-opus-5",
+        "extracted_by": expected_call["model"],
         "materials": 2,
         "variants": ["Standard", "Premium"],
     }

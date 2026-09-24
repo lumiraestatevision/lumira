@@ -280,11 +280,14 @@ services:
       <<: *python-env
       SERVICE_NAME: blv
       PORT: "8004"
-      # Nur dieser Service bekommt den API-Key. Ohne Key: Stub-Modus.
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # Nur dieser Service bekommt die API-Keys. Ohne Key für den Anbieter: Stub-Modus.
+      BLV_PROVIDER: ${BLV_PROVIDER:-anthropic}
       BLV_MODE: ${BLV_MODE:-auto}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       BLV_MODEL: ${BLV_MODEL:-claude-opus-5}
       BLV_LLM_FALLBACKS: ${BLV_LLM_FALLBACKS:-true}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      BLV_GEMINI_MODEL: ${BLV_GEMINI_MODEL:-gemini-3.8-flash}
     ports:
       - "127.0.0.1:8004:8004"
     volumes:

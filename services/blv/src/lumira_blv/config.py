@@ -4,31 +4,49 @@ from pydantic import SecretStr, model_validator
 
 from lumira_shared import BaseServiceSettings
 
+Provider = Literal["anthropic", "gemini"]
+_KEY_ENV = {"anthropic": "ANTHROPIC_API_KEY", "gemini": "GEMINI_API_KEY"}
+
 
 class BLVSettings(BaseServiceSettings):
     service_name: str = "blv"
     port: int = 8004
 
-    anthropic_api_key: SecretStr | None = None
-    # auto: LLM, wenn ein API-Key gesetzt ist, sonst Stub | llm: Key Pflicht | stub: nie LLM
+    # Welcher LLM-Anbieter das LV auswertet. gemini: Gratistarif NUR für lokale Entwicklung
+    # (siehe logic/gemini.py). Produktion: anthropic.
+    blv_provider: Provider = "anthropic"
+    # auto: LLM, wenn ein Key für den Anbieter gesetzt ist, sonst Stub | llm: Key Pflicht | stub
     blv_mode: Literal["auto", "llm", "stub"] = "auto"
+
+    anthropic_api_key: SecretStr | None = None
     blv_model: str = "claude-opus-5"
     # Server-seitiger Fallback, falls die Sicherheitsklassifikatoren des Modells eine Anfrage
     # ablehnen (empfohlen für claude-opus-5; bei anderen Modellen ggf. abschalten).
     blv_llm_fallbacks: bool = True
-    blv_max_pdf_mb: int = 30  # API-Limit: 32 MB pro Anfrage
+
+    gemini_api_key: SecretStr | None = None
+    blv_gemini_model: str = "gemini-3.8-flash"
+
+    blv_max_pdf_mb: int = 30  # Claude: 32 MB, Gemini: 50 MB pro Anfrage
     blv_max_pages: int = 300
 
     @model_validator(mode="after")
     def _key_required_for_llm(self) -> Self:
         if self.blv_mode == "llm" and not self.api_key:
-            raise ValueError("BLV_MODE=llm benötigt ANTHROPIC_API_KEY")
+            raise ValueError(
+                f"BLV_MODE=llm mit BLV_PROVIDER={self.blv_provider} benötigt {_KEY_ENV[self.blv_provider]}"
+            )
         return self
 
     @property
     def api_key(self) -> str | None:
-        key = self.anthropic_api_key.get_secret_value() if self.anthropic_api_key else ""
+        secret = self.anthropic_api_key if self.blv_provider == "anthropic" else self.gemini_api_key
+        key = secret.get_secret_value().strip() if secret else ""
         return key or None
+
+    @property
+    def model(self) -> str:
+        return self.blv_model if self.blv_provider == "anthropic" else self.blv_gemini_model
 
     @property
     def use_llm(self) -> bool:

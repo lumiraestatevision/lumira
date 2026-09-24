@@ -12,6 +12,9 @@ coverage.xml
 dist/
 build/
 
+# --- Echte Kundendaten (Grundrisse, Leistungsverzeichnisse) – niemals committen
+testdata/private/
+
 # --- Umgebung / Geheimnisse
 .env
 .env.*

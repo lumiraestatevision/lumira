@@ -6,6 +6,7 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
   "lumira-shared",
   "anthropic>=0.69",
+  "google-genai>=2.25",
   "pypdfium2>=4.30",
 ]
 
