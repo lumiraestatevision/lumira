@@ -841,7 +841,7 @@ dev = [
     { name = "aiosqlite", specifier = ">=0.21" },
     { name = "fakeredis", specifier = ">=2.30" },
     { name = "httpx2", specifier = ">=2.13" },
-    { name = "moto", extras = ["s3"], specifier = ">=5.1" },
+    { name = "moto", extras = ["s3"], specifier = ">=5.2.3" },
     { name = "pyright", specifier = ">=1.1.400" },
     { name = "pytest", specifier = ">=8.3" },
     { name = "pytest-asyncio", specifier = ">=1.0" },
@@ -885,7 +885,7 @@ requires-dist = [
 dev = [
     { name = "fakeredis", specifier = ">=2.30" },
     { name = "httpx2", specifier = ">=2.13" },
-    { name = "moto", extras = ["s3"], specifier = ">=5.1" },
+    { name = "moto", extras = ["s3"], specifier = ">=5.2.3" },
     { name = "pypdf", specifier = ">=5.0" },
     { name = "pyright", specifier = ">=1.1.400" },
     { name = "pytest", specifier = ">=8.3" },
@@ -927,7 +927,7 @@ requires-dist = [
 dev = [
     { name = "fakeredis", specifier = ">=2.30" },
     { name = "httpx2", specifier = ">=2.13" },
-    { name = "moto", extras = ["s3"], specifier = ">=5.1" },
+    { name = "moto", extras = ["s3"], specifier = ">=5.2.3" },
     { name = "pyright", specifier = ">=1.1.400" },
     { name = "pytest", specifier = ">=8.3" },
     { name = "pytest-asyncio", specifier = ">=1.0" },
@@ -962,7 +962,7 @@ requires-dist = [{ name = "lumira-shared", editable = "packages/shared" }]
 dev = [
     { name = "fakeredis", specifier = ">=2.30" },
     { name = "httpx2", specifier = ">=2.13" },
-    { name = "moto", extras = ["s3"], specifier = ">=5.1" },
+    { name = "moto", extras = ["s3"], specifier = ">=5.2.3" },
     { name = "pyright", specifier = ">=1.1.400" },
     { name = "pytest", specifier = ">=8.3" },
     { name = "pytest-asyncio", specifier = ">=1.0" },
@@ -1008,7 +1008,7 @@ requires-dist = [
 dev = [
     { name = "fakeredis", specifier = ">=2.30" },
     { name = "httpx2", specifier = ">=2.13" },
-    { name = "moto", extras = ["s3"], specifier = ">=5.1" },
+    { name = "moto", extras = ["s3"], specifier = ">=5.2.3" },
     { name = "pypdf", specifier = ">=5.0" },
     { name = "pyright", specifier = ">=1.1.400" },
     { name = "pytest", specifier = ">=8.3" },
@@ -1069,7 +1069,7 @@ provides-extras = ["cpu", "cu130"]
 dev = [
     { name = "fakeredis", specifier = ">=2.30" },
     { name = "httpx2", specifier = ">=2.13" },
-    { name = "moto", extras = ["s3"], specifier = ">=5.1" },
+    { name = "moto", extras = ["s3"], specifier = ">=5.2.3" },
     { name = "pyright", specifier = ">=1.1.400" },
     { name = "pytest", specifier = ">=8.3" },
     { name = "pytest-asyncio", specifier = ">=1.0" },
@@ -1119,7 +1119,7 @@ requires-dist = [
 dev = [
     { name = "fakeredis", specifier = ">=2.30" },
     { name = "httpx2", specifier = ">=2.13" },
-    { name = "moto", extras = ["s3"], specifier = ">=5.1" },
+    { name = "moto", extras = ["s3"], specifier = ">=5.2.3" },
     { name = "pyright", specifier = ">=1.1.400" },
     { name = "pytest", specifier = ">=8.3" },
     { name = "pytest-asyncio", specifier = ">=1.0" },
@@ -1155,7 +1155,7 @@ requires-dist = [{ name = "lumira-shared", editable = "packages/shared" }]
 dev = [
     { name = "fakeredis", specifier = ">=2.30" },
     { name = "httpx2", specifier = ">=2.13" },
-    { name = "moto", extras = ["s3"], specifier = ">=5.1" },
+    { name = "moto", extras = ["s3"], specifier = ">=5.2.3" },
     { name = "pyright", specifier = ">=1.1.400" },
     { name = "pytest", specifier = ">=8.3" },
     { name = "pytest-asyncio", specifier = ">=1.0" },
