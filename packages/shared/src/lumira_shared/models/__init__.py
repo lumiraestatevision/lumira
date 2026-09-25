@@ -21,7 +21,7 @@ from lumira_shared.models.floorplan import (
     Wall,
 )
 from lumira_shared.models.geometry import Confidence, Point2D, Polygon, polygon_area_mm2
-from lumira_shared.models.parsed import ParsedPlan, Segment, TextItem
+from lumira_shared.models.parsed import FilledArea, ParsedPlan, Segment, Stroke, TextItem
 
 __all__ = [
     "DEFAULT_WALL_HEIGHT_MM",
@@ -30,6 +30,7 @@ __all__ = [
     "Confidence",
     "DoorSwing",
     "EquipmentVariant",
+    "FilledArea",
     "FloorPlan",
     "LumiraModel",
     "Material",
@@ -44,6 +45,7 @@ __all__ = [
     "RoomType",
     "Segment",
     "SourceFormat",
+    "Stroke",
     "TextItem",
     "Wall",
     "new_id",

@@ -96,6 +96,17 @@ def test_scene_materials_follow_blv() -> None:
     assert wall["openings"] == [
         {"id": "o1", "type": "door", "offset": 500.0, "width": 885.0, "height": 2010.0, "sill": 0.0}
     ]
+    assert wall["footprint"] is None  # Quader aus Achse und Dicke
+
+
+def test_scene_passes_exact_wall_footprint() -> None:
+    plan = _plan()
+    l_shape = [(0, 0), (3_000, 0), (3_000, 300), (300, 300), (300, 2_000), (0, 2_000)]
+    plan.walls[0].footprint = [Point2D(x=x, y=y) for x, y in l_shape]
+
+    [wall] = build_scene(plan, _blv(plan.project_id))["walls"]
+
+    assert wall["footprint"] == [[float(x), float(y)] for x, y in l_shape]
 
 
 def test_only_visible_interior_surfaces_are_used() -> None:

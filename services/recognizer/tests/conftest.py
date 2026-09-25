@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import math
 import uuid
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator
 
 import pytest
 from fakeredis import FakeAsyncRedis, FakeServer
@@ -9,7 +10,15 @@ from moto import mock_aws
 
 from lumira_recognizer.config import RecognizerSettings
 from lumira_shared import S3Storage, ServiceContext, StreamPublisher, get_logger
-from lumira_shared.models import ParsedPlan, Point2D, Segment, SourceFormat, TextItem
+from lumira_shared.models import (
+    FilledArea,
+    ParsedPlan,
+    Point2D,
+    Segment,
+    SourceFormat,
+    Stroke,
+    TextItem,
+)
 
 # Gleiche Wohnung wie lumira_parser.samples – hier dupliziert, damit der recognizer
 # ohne den parser testbar bleibt (unabhängige Services).
@@ -43,6 +52,66 @@ def parsed_plan() -> ParsedPlan:
         ],
         texts=[TextItem(text=t, position=Point2D(x=x, y=y)) for t, x, y in LABELS],
     )
+
+
+# CAD-Beispiel wie lumira_parser.samples.sample_cad_pdf: Wände grau gefüllt, Räume farbig.
+# Wohnen 5,00 x 6,00 m, Bad 3,00 x 6,00 m; Fenster 1,50 m unten und 1,00 m rechts,
+# Tür 0,90 m in der Innenwand mit Aufschlag ins Wohnen (Drehpunkt 5300/1000).
+CAD_WALLS = [
+    (0, 0, 1_500, 300),
+    (3_000, 0, 8_715, 300),
+    (0, 6_300, 8_715, 6_600),
+    (0, 300, 300, 6_300),
+    (8_415, 300, 8_715, 2_500),
+    (8_415, 3_500, 8_715, 6_300),
+    (5_300, 300, 5_415, 1_000),
+    (5_300, 1_900, 5_415, 6_300),
+]
+CAD_ROOMS = [
+    ("Wohnen", "F: 30,00 m²", (300, 300, 5_300, 6_300), "#FFFFA8"),
+    ("Bad", "F: 18,00 m²", (5_415, 300, 8_415, 6_300), "#D6FFA8"),
+]
+CadPlanFactory = Callable[..., ParsedPlan]
+
+
+def _rect(x0: float, y0: float, x1: float, y1: float, k: float) -> list[Point2D]:
+    return [Point2D(x=x * k, y=y * k) for x, y in ((x0, y0), (x1, y0), (x1, y1), (x0, y1))]
+
+
+@pytest.fixture
+def cad_plan() -> CadPlanFactory:
+    """``factor`` ≠ 1 simuliert einen falsch angenommenen Maßstab (alles gestreckt);
+    ``fills=False`` einen Plan ohne Raumfarben, ``door_arc=False`` ohne Türbogen."""
+
+    def build(*, factor: float = 1.0, fills: bool = True, door_arc: bool = True) -> ParsedPlan:
+        areas = [FilledArea(polygon=_rect(*r, factor), color="#808080") for r in CAD_WALLS]
+        if fills:
+            areas += [FilledArea(polygon=_rect(*r, factor), color=c) for _, _, r, c in CAD_ROOMS]
+        texts = []
+        for name, area, (x0, y0, x1, y1), _ in CAD_ROOMS:
+            cx, cy = (x0 + x1) / 2 * factor, (y0 + y1) / 2 * factor
+            texts += [
+                TextItem(text=area, position=Point2D(x=cx, y=cy - 300 * factor), height_mm=280),
+                TextItem(text=name, position=Point2D(x=cx, y=cy + 200 * factor), height_mm=350),
+                TextItem(text="3,00", position=Point2D(x=cx, y=cy - 900 * factor), height_mm=250),
+            ]
+        arc = [
+            Point2D(x=(5_300 - 900 * math.sin(a)) * factor, y=(1_000 + 900 * math.cos(a)) * factor)
+            for a in (i * math.pi / 16 for i in range(9))
+        ]
+        return ParsedPlan(
+            project_id=uuid.uuid4(),
+            source_key="projects/x/upload/floor_plan.pdf",
+            source_format=SourceFormat.PDF,
+            width_mm=29_700 * factor,
+            height_mm=21_000 * factor,
+            plan_scale=100 * factor,
+            filled_areas=areas,
+            curves=[Stroke(points=arc)] if door_arc else [],
+            texts=texts,
+        )
+
+    return build
 
 
 @pytest.fixture

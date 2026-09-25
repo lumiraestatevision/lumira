@@ -32,6 +32,9 @@ from lumira_shared.models import RoomType as R
         ("Duschbad", R.BATHROOM),
         ("WC", R.WC),
         ("Gäste-WC", R.WC),
+        ("G-WC F:4,46 m2", R.WC),  # Beschriftungen aus einem echten CAD-Plan
+        ("Gast F:14,58 m2", R.BEDROOM),
+        ("Wohnen /Essen F: 38,37 m2", R.LIVING),
         ("Gäste WC 2,1 m²", R.WC),
         ("Flur", R.HALLWAY),
         ("Diele", R.HALLWAY),

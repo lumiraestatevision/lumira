@@ -60,6 +60,8 @@ def build_scene(plan: FloorPlan, blv: BLVResult, *, variant: str | None = None) 
             "thickness": wall.thickness_mm,
             "height": wall.height_mm,
             "exterior": bool(wall.is_exterior),
+            # Exakter Grundriss (CAD-Fläche) – sonst baut Blender einen Quader aus der Achse.
+            "footprint": [[p.x, p.y] for p in wall.footprint] if wall.footprint else None,
             "openings": [
                 {
                     "id": o.id,

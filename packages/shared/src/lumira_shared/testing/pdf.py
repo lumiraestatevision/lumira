@@ -1,4 +1,4 @@
-"""Minimaler PDF-Writer für Testdaten: Linien und Text, beliebig viele Seiten.
+"""Minimaler PDF-Writer für Testdaten: Linien, Linienzüge, gefüllte Flächen und Text.
 
 Bewusst ohne Bibliothek (z. B. PyMuPDF steht unter AGPL) – PDF ist für diesen Zweck ein
 einfaches Textformat. Koordinaten in PDF-Punkten (1 pt = 1/72 Zoll), Ursprung unten links.
@@ -11,12 +11,17 @@ from dataclasses import dataclass, field
 
 Line = tuple[float, float, float, float]  # x1, y1, x2, y2
 Text = tuple[float, float, str, float]  # x, y, text, Schriftgröße
+RGB = tuple[float, float, float]  # 0..1
+Fill = tuple[list[tuple[float, float]], RGB]  # gefülltes Polygon (CAD: Wände, Raumflächen)
+Polyline = tuple[list[tuple[float, float]], float]  # Linienzug + Strichstärke (z. B. Türbogen)
 
 
 @dataclass
 class PdfPage:
     lines: list[Line] = field(default_factory=list)
     texts: list[Text] = field(default_factory=list)
+    fills: list[Fill] = field(default_factory=list)
+    polylines: list[Polyline] = field(default_factory=list)
     width: float = 842.0  # A4 quer
     height: float = 595.0
     line_width: float = 2.0
@@ -27,8 +32,19 @@ def _escape(text: str) -> bytes:
     return raw.replace(b"\\", b"\\\\").replace(b"(", b"\\(").replace(b")", b"\\)")
 
 
+def _path(points: list[tuple[float, float]]) -> str:
+    (x0, y0), *rest = points
+    return f"{x0:.2f} {y0:.2f} m " + " ".join(f"{x:.2f} {y:.2f} l" for x, y in rest)
+
+
 def _content(page: PdfPage) -> bytes:
-    parts = [f"q {page.line_width:g} w\n".encode()]
+    # Füllungen zuerst (liegen in CAD-Plänen unter Linien und Text)
+    parts = [
+        f"{r:g} {g:g} {b:g} rg {_path(points)} h f\n".encode() for points, (r, g, b) in page.fills
+    ]
+    parts.append(b"0 0 0 rg\n")
+    parts += [f"q {width:g} w {_path(points)} S Q\n".encode() for points, width in page.polylines]
+    parts.append(f"q {page.line_width:g} w\n".encode())
     parts += [
         f"{x1:.2f} {y1:.2f} m {x2:.2f} {y2:.2f} l S\n".encode() for x1, y1, x2, y2 in page.lines
     ]

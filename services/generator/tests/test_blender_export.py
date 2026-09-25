@@ -64,6 +64,25 @@ def _scene() -> dict:
     walls.append(
         Wall(id="w4", start=Point2D(x=6_000, y=0), end=Point2D(x=6_000, y=8_000), thickness_mm=115)
     )
+    # CAD-Fall: L-förmige Wandfläche mit exaktem Grundriss + Öffnung über ein ganzes Wandstück
+    l_shape = [(0, 9_000), (3_000, 9_000), (3_000, 9_300), (300, 9_300), (300, 11_000), (0, 11_000)]
+    walls.append(
+        Wall(
+            id="w5",
+            start=Point2D(x=0, y=9_150),
+            end=Point2D(x=3_000, y=9_150),
+            thickness_mm=300,
+            footprint=[Point2D(x=x, y=y) for x, y in l_shape],
+        )
+    )
+    walls.append(
+        Wall(
+            id="gap",
+            start=Point2D(x=3_000, y=9_150),
+            end=Point2D(x=4_000, y=9_150),
+            thickness_mm=300,
+        )
+    )
     plan = FloorPlan(
         project_id=uuid.uuid4(),
         source_key="plan.dxf",
@@ -86,6 +105,15 @@ def _scene() -> dict:
                 offset_mm=3_000,
                 width_mm=885,
                 height_mm=2_010,
+            ),
+            Opening(
+                id="gap_window",
+                type=OpeningType.WINDOW,
+                wall_id="gap",
+                offset_mm=0,
+                width_mm=1_000,
+                height_mm=1_385,
+                sill_height_mm=900,
             ),
         ],
         rooms=[
@@ -124,9 +152,9 @@ async def test_real_blender_exports_fbx_and_gltf(tmp_path: Path) -> None:
         timeout_s=300,
     )
 
-    assert result.stats["walls"] == 5
+    assert result.stats["walls"] == 7
     assert result.stats["rooms"] == 2
-    assert result.stats["openings"] == 2
+    assert result.stats["openings"] == 3
     assert result.stats["blender"].startswith("4.")
 
     glb = result.glb.read_bytes()

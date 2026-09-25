@@ -67,7 +67,10 @@ async def handle_project_created(event: Event, ctx: ServiceContext) -> Event:
         page_count=raw.page_count,
         width_mm=raw.width_mm,
         height_mm=raw.height_mm,
+        plan_scale=raw.plan_scale,
         segments=raw.segments,
+        filled_areas=raw.filled_areas,
+        curves=raw.curves,
         texts=raw.texts,
         page_image_key=page_image_key,
         notes=raw.notes,
@@ -76,10 +79,16 @@ async def handle_project_created(event: Event, ctx: ServiceContext) -> Event:
     await ctx.storage.put_json(parsed_key, parsed)
     artifacts[Artifact.PARSED_PLAN] = parsed_key
 
-    ctx.log.info("plan.parsed", format=str(fmt), segments=len(raw.segments), texts=len(raw.texts))
+    counts = {
+        "segments": len(raw.segments),
+        "filled_areas": len(raw.filled_areas),
+        "curves": len(raw.curves),
+        "texts": len(raw.texts),
+    }
+    ctx.log.info("plan.parsed", format=str(fmt), scale=raw.plan_scale, **counts)
     return event.follow_up(
         EventType.PLAN_PARSED,
         producer=settings.service_name,
         artifacts=artifacts,
-        data={"format": str(fmt), "segments": len(raw.segments), "texts": len(raw.texts)},
+        data={"format": str(fmt), "scale": raw.plan_scale, **counts},
     )

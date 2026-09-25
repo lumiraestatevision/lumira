@@ -63,6 +63,11 @@ class Wall(LumiraModel):
     end: Point2D
     thickness_mm: float = Field(gt=0, le=2000)
     height_mm: float = Field(default=DEFAULT_WALL_HEIGHT_MM, gt=0)
+    footprint: Polygon | None = Field(
+        default=None,
+        description="Exakter Wandgrundriss (z. B. gefüllte CAD-Fläche mit Gehrung oder L-Form); "
+        "ohne: Quader aus Achse und Dicke",
+    )
     is_exterior: bool | None = None
     is_load_bearing: bool | None = None
     confidence: Confidence = 1.0

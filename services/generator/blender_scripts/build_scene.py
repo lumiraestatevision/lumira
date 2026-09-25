@@ -5,8 +5,9 @@ Läuft INNERHALB von Blender (eigenes Python, bpy eingebaut) – nicht mit dem S
     blender --background --factory-startup --python-exit-code 1 \\
         --python build_scene.py -- --spec scene.json --fbx model.fbx --glb model.glb
 
-Umfang: Wände als Quader mit ausgeschnittenen Tür-/Fensteröffnungen, Böden je Raum mit
-Materialfarbe aus dem Leistungsverzeichnis. STUB: keine Türblätter, Fensterrahmen,
+Umfang: Wände aus exaktem Grundriss (CAD-Fläche, als Prisma) oder als Quader aus Achse und
+Dicke; Öffnungen als Wandstück mit ausgeschnittener Tür/Fenster (bleiben: Sturz, Brüstung).
+Böden je Raum mit Materialfarbe aus dem Leistungsverzeichnis. STUB: keine Türblätter, Fensterrahmen,
 Decken, Möblierung, Texturen/UVs – das folgt mit der Unreal-Pipeline.
 """
 
@@ -77,7 +78,35 @@ def bake_modifiers(obj):
     obj.data = mesh
 
 
+def prism(name, footprint, height):
+    """Senkrechtes Prisma aus einem Grundriss-Polygon (Wand mit Gehrung, L-Form …)."""
+    points = [(x * MM, y * MM) for x, y in footprint]
+    twice_area = sum(
+        ax * by - bx * ay
+        for (ax, ay), (bx, by) in zip(points, points[1:] + points[:1], strict=True)
+    )
+    if twice_area < 0:
+        points.reverse()  # gegen den Uhrzeigersinn → Deckfläche zeigt nach oben
+    mesh = bpy.data.meshes.new(name)
+    bm = bmesh.new()
+    bottom = bm.faces.new([bm.verts.new((x, y, 0.0)) for x, y in points])
+    extruded = bmesh.ops.extrude_face_region(bm, geom=[bottom])
+    top_verts = [v for v in extruded["geom"] if isinstance(v, bmesh.types.BMVert)]
+    bmesh.ops.translate(bm, vec=(0.0, 0.0, height), verts=top_verts)
+    bottom.normal_flip()  # Bodenfläche zeigt nach unten
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    bm.to_mesh(mesh)
+    bm.free()
+    obj = bpy.data.objects.new(name, mesh)
+    bpy.context.scene.collection.objects.link(obj)
+    return obj
+
+
 def build_wall(wall, finish):
+    if wall.get("footprint"):
+        obj = prism(f"Wall_{wall['id']}", wall["footprint"], wall["height"] * MM)
+        obj.data.materials.append(material(finish["name"], finish["color"], roughness=0.8))
+        return 0
     (x1, y1), (x2, y2) = wall["start"], wall["end"]
     dx, dy = (x2 - x1) * MM, (y2 - y1) * MM
     length = math.hypot(dx, dy)
@@ -94,9 +123,11 @@ def build_wall(wall, finish):
     for opening in wall["openings"]:
         width, op_height = opening["width"] * MM, opening["height"] * MM
         along = opening["offset"] * MM + width / 2 - length / 2
+        # 2 mm breiter: füllt die Öffnung die ganze Wandlänge (CAD-Lücke zwischen zwei
+        # Wandflächen), schneidet der Boolean sonst entlang deckungsgleicher Flächen.
         cutter = box(
             f"Cut_{opening['id']}",
-            (width, thickness * 3, op_height),
+            (width + 0.002, thickness * 3, op_height),
             (mid[0] + ux * along, mid[1] + uy * along, opening["sill"] * MM + op_height / 2),
             angle,
         )

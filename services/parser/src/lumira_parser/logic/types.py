@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from lumira_shared.models import Segment, TextItem
+from lumira_shared.models import FilledArea, Segment, Stroke, TextItem
 
 
 def dedupe_segments(segments: list[Segment], tolerance_mm: float = 1.0) -> list[Segment]:
@@ -25,7 +25,10 @@ class RawPlan:
 
     width_mm: float
     height_mm: float
+    plan_scale: float | None = None
     segments: list[Segment] = field(default_factory=list)
+    filled_areas: list[FilledArea] = field(default_factory=list)
+    curves: list[Stroke] = field(default_factory=list)
     texts: list[TextItem] = field(default_factory=list)
     page_count: int = 1
     page_png: bytes | None = None

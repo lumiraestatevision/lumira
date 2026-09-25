@@ -49,6 +49,7 @@ _PREFIXES: tuple[tuple[str, RoomType], ...] = (
     ("schlaf", RoomType.BEDROOM),
     ("eltern", RoomType.BEDROOM),
     ("gaeste", RoomType.BEDROOM),
+    ("gast", RoomType.BEDROOM),  # „Gast“ = Gästezimmer (Gäste-WC ist oben schon WC)
     ("kinder", RoomType.CHILD),
     ("arbeit", RoomType.OFFICE),
     ("buero", RoomType.OFFICE),

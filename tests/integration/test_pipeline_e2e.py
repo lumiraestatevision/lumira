@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from lumira_parser.samples import sample_dxf, sample_pdf
+from lumira_parser.samples import sample_cad_pdf, sample_dxf, sample_pdf
 from lumira_shared.testing import PdfPage, simple_pdf
 
 pytestmark = pytest.mark.integration
@@ -71,6 +71,28 @@ def test_dxf_project_runs_through_complete_chain(pipeline: Pipeline) -> None:
     _assert_valid_glb(pipeline.artifact(project_id, "model_gltf").content)
     fbx = pipeline.artifact(project_id, "model_fbx").content
     assert fbx.startswith(b"Kaydara FBX Binary")
+
+
+def test_cad_pdf_with_filled_walls_is_read_exactly(pipeline: Pipeline) -> None:
+    """CAD-Export (Wände grau gefüllt, Räume farbig): Maße, Öffnungen und Räume 1:1."""
+    project_id = pipeline.create(
+        "E2E CAD-PDF", {"floor_plan": ("grundriss.pdf", sample_cad_pdf(), "application/pdf")}
+    )
+
+    detail = pipeline.wait_until_finished(project_id)
+
+    assert detail["status"] == "completed", detail["error"]
+    plan = pipeline.artifact(project_id, "classified_plan").json()
+    assert plan["metadata"]["recognizer"] == "cad-fills"
+    assert plan["metadata"]["scale"] == "1:100"
+    assert plan["metadata"]["scale_check"].startswith("Maßstab bestätigt")
+    rooms = {room["room_type"]: room["area_m2"] for room in plan["rooms"]}
+    assert rooms == {"living": 30.0, "bathroom": 18.0}
+    openings = sorted((o["type"], round(o["width_mm"])) for o in plan["openings"])
+    assert openings == [("door", 900), ("window", 1000), ("window", 1500)]
+    assert sum(1 for w in plan["walls"] if w["footprint"]) == 8
+
+    _assert_valid_glb(pipeline.artifact(project_id, "model_gltf").content)
 
 
 def test_pdf_project_also_renders_page_image(pipeline: Pipeline) -> None:

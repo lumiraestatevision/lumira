@@ -25,7 +25,13 @@ async def test_handler_stores_floor_plan(ctx: ServiceContext, parsed_plan: Parse
     result = await handle_plan_parsed(event, ctx)
 
     assert result.type is EventType.PLAN_RECOGNIZED
-    assert result.data == {"walls": 7, "rooms": 4, "openings": 7, "device": "cpu"}
+    assert result.data == {
+        "walls": 7,
+        "rooms": 4,
+        "openings": 7,
+        "device": "cpu",
+        "method": "grid-flood-fill",  # Linienplan ohne gefüllte Wände → einfaches Verfahren
+    }
     plan = await ctx.storage.get_model(result.artifacts[Artifact.RECOGNIZED_PLAN], FloorPlan)
     assert len(plan.rooms) == 4
 
