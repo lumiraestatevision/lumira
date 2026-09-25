@@ -53,5 +53,13 @@ export const getProject = (id: string) => request<ProjectDetail>(`/projects/${id
 export const createProject = (form: FormData) =>
   request<Project>("/projects", { method: "POST", body: form });
 
+export async function deleteProject(id: string): Promise<void> {
+  const response = await fetch(`${API_URL}/projects/${id}`, { method: "DELETE" });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(typeof body.detail === "string" ? body.detail : `HTTP ${response.status}`);
+  }
+}
+
 export const artifactUrl = (projectId: string, name: string) =>
   `${API_URL}/projects/${projectId}/artifacts/${name}`;

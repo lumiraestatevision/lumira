@@ -154,6 +154,31 @@ button:disabled {
   color: var(--error);
 }
 
+.project .actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Zurückhaltend, damit er nicht versehentlich geklickt wird – rot erst beim Zeigen */
+button.danger {
+  padding: 3px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--border);
+}
+
+button.danger:hover:not(:disabled) {
+  color: var(--error);
+  border-color: var(--error);
+}
+
+button.danger:disabled {
+  cursor: not-allowed;
+}
+
 .steps {
   display: flex;
   flex-wrap: wrap;

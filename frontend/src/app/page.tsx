@@ -9,6 +9,7 @@ import {
   type ProjectDetail,
   artifactUrl,
   createProject,
+  deleteProject,
   getProject,
   listProjects,
 } from "@/lib/api";
@@ -98,23 +99,56 @@ export default function Home() {
         <h2>Projekte</h2>
         {projects.length === 0 && <p className="muted">Noch keine Projekte.</p>}
         {projects.map((project) => (
-          <ProjectRow key={project.id} project={project} />
+          <ProjectRow key={project.id} project={project} onDeleted={refresh} />
         ))}
       </section>
     </main>
   );
 }
 
-function ProjectRow({ project }: { project: ProjectDetail }) {
+function ProjectRow({ project, onDeleted }: { project: ProjectDetail; onDeleted: () => Promise<void> }) {
   const done = new Set(project.events.map((e) => e.type));
   const hasModel = "model_gltf" in project.artifacts;
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  async function onDelete() {
+    if (!window.confirm(`Projekt „${project.name}“ mit allen Dateien und dem 3D-Modell endgültig löschen?`)) {
+      return;
+    }
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await deleteProject(project.id);
+      await onDeleted();
+    } catch (e) {
+      setDeleteError((e as Error).message);
+      setDeleting(false);
+    }
+  }
 
   return (
     <article className="project">
       <header>
         <strong>{project.name}</strong>
-        <span className={`badge ${project.status}`}>{STATUS_LABEL[project.status]}</span>
+        <span className="actions">
+          <span className={`badge ${project.status}`}>{STATUS_LABEL[project.status]}</span>
+          <button
+            type="button"
+            className="danger"
+            onClick={() => void onDelete()}
+            disabled={deleting || project.status === "processing"}
+            title={
+              project.status === "processing"
+                ? "Löschen ist möglich, sobald das Projekt fertig oder fehlgeschlagen ist"
+                : "Projekt und alle Dateien löschen"
+            }
+          >
+            {deleting ? "Wird gelöscht …" : "Löschen"}
+          </button>
+        </span>
       </header>
+      {deleteError && <p className="error">{deleteError}</p>}
       <ol className="steps">
         {PIPELINE_STEPS.map((step) => (
           <li key={step} className={done.has(step) ? "done" : undefined}>

@@ -167,6 +167,25 @@ class S3Storage:
     async def delete(self, key: str) -> None:
         await asyncio.to_thread(self._client.delete_object, Bucket=self.bucket, Key=key)
 
+    async def delete_prefix(self, prefix: str) -> int:
+        """Löscht alle Objekte unter ``prefix`` (z. B. ``projects/<id>/``), liefert die Anzahl."""
+        if not prefix or not prefix.endswith("/"):
+            raise ValueError(
+                "Präfix muss auf '/' enden – schützt vor versehentlichem Massenlöschen"
+            )
+
+        def _delete() -> int:
+            deleted = 0
+            paginator = self._client.get_paginator("list_objects_v2")
+            for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
+                keys = [{"Key": obj["Key"]} for obj in page.get("Contents", []) if "Key" in obj]
+                if keys:  # delete_objects: höchstens 1.000 Keys – so groß ist eine Seite
+                    self._client.delete_objects(Bucket=self.bucket, Delete={"Objects": keys})  # pyright: ignore[reportArgumentType]
+                    deleted += len(keys)
+            return deleted
+
+        return await asyncio.to_thread(_delete)
+
     # ------------------------------------------------------------------ JSON / Modelle
     async def put_json(self, key: str, obj: BaseModel | Mapping[str, Any] | list[Any]) -> str:
         if isinstance(obj, BaseModel):

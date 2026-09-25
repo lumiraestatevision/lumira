@@ -73,6 +73,22 @@ def test_dxf_project_runs_through_complete_chain(pipeline: Pipeline) -> None:
     assert fbx.startswith(b"Kaydara FBX Binary")
 
 
+def test_finished_project_can_be_deleted_with_all_files(pipeline: Pipeline) -> None:
+    project_id = pipeline.create(
+        "E2E Löschen", {"floor_plan": ("grundriss.dxf", sample_dxf(), "application/dxf")}
+    )
+    detail = pipeline.wait_until_finished(project_id)
+    assert detail["status"] == "completed", detail["error"]
+    assert pipeline.artifact(project_id, "model_gltf").content
+
+    assert pipeline.client.delete(f"/projects/{project_id}").status_code == 204
+
+    assert pipeline.client.get(f"/projects/{project_id}").status_code == 404
+    assert pipeline.client.get(f"/projects/{project_id}/artifacts/model_gltf").status_code == 404
+    listed = [p["id"] for p in pipeline.client.get("/projects").json()]
+    assert project_id not in listed
+
+
 def test_cad_pdf_with_filled_walls_is_read_exactly(pipeline: Pipeline) -> None:
     """CAD-Export (Wände grau gefüllt, Räume farbig): Maße, Öffnungen und Räume 1:1."""
     project_id = pipeline.create(

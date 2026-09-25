@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime, timedelta
 from pathlib import PurePath
 from typing import Annotated, cast
 
@@ -37,6 +38,7 @@ router = APIRouter(prefix="/projects", tags=["projects"])
 PLAN_EXTENSIONS = {".pdf", ".dxf", ".dwg"}
 BLV_EXTENSIONS = {".pdf"}
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+STUCK_AFTER = timedelta(minutes=30)  # länger „in Bearbeitung“ = hängt → darf gelöscht werden
 
 Ctx = Annotated[ServiceContext, Depends(get_context)]
 
@@ -146,6 +148,34 @@ async def get_project(project_id: uuid.UUID, db: Db) -> ProjectDetail:
         if project is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Projekt nicht gefunden")
         return ProjectDetail.model_validate(project)
+
+
+@router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_project(project_id: uuid.UUID, ctx: Ctx, db: Db) -> Response:
+    """Projekt samt aller Dateien (Uploads, Zwischenergebnisse, 3D-Modelle) endgültig löschen.
+
+    Läuft die Pipeline noch, wird abgelehnt – sonst schrieben die Services danach wieder
+    Dateien in den Speicher. Hängt ein Projekt länger als ``STUCK_AFTER``, darf es weg.
+    """
+    async with db.sessionmaker() as session, session.begin():
+        # Events mitladen: das ORM löscht sie mit (async kennt kein Nachladen beim Löschen).
+        project = await session.scalar(
+            select(Project).where(Project.id == project_id).options(selectinload(Project.events))
+        )
+        if project is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Projekt nicht gefunden")
+        updated = project.updated_at
+        if updated.tzinfo is None:  # SQLite (Tests) speichert ohne Zeitzone
+            updated = updated.replace(tzinfo=UTC)
+        if project.status is ProjectStatus.PROCESSING and datetime.now(UTC) - updated < STUCK_AFTER:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "Projekt wird noch berechnet – bitte warten, bis es fertig oder fehlgeschlagen ist",
+            )
+        await session.delete(project)
+    files = await ctx.storage.delete_prefix(f"projects/{project_id}/")
+    ctx.log.info("project.deleted", project_id=str(project_id), files=files)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/{project_id}/artifacts/{name}")

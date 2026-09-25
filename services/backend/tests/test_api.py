@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import time
+import uuid
 from collections.abc import Callable, Iterator
+from datetime import UTC, datetime, timedelta
 from typing import cast
 
 import pytest
@@ -10,7 +12,7 @@ from fastapi.testclient import TestClient
 from moto import mock_aws
 
 from lumira_backend.config import BackendSettings
-from lumira_backend.db import Database
+from lumira_backend.db import Database, Project, ProjectStatus
 from lumira_backend.main import create_app
 from lumira_shared import EventType, S3Storage, stream_name
 
@@ -25,10 +27,13 @@ def _wait_until(predicate: Callable[[], bool], timeout: float = 5.0) -> bool:
 
 
 class Stack:
-    def __init__(self, client: TestClient, redis: FakeAsyncRedis, storage: S3Storage) -> None:
+    def __init__(
+        self, client: TestClient, redis: FakeAsyncRedis, storage: S3Storage, db: Database
+    ) -> None:
         self.client = client
         self.redis = redis
         self.storage = storage
+        self.db = db
         portal = client.portal
         assert portal is not None
         self.portal = portal
@@ -42,7 +47,7 @@ def stack(settings: BackendSettings, aws_env: None) -> Iterator[Stack]:
         db = Database(settings.database_url)
         app = create_app(settings, db=db, redis=redis, storage=storage)
         with TestClient(app) as client:
-            s = Stack(client, redis, storage)
+            s = Stack(client, redis, storage, db)
             s.portal.call(db.create_all)
             s.portal.call(storage.ensure_bucket)
             yield s
@@ -101,3 +106,38 @@ def test_rejects_too_large_upload(stack: Stack) -> None:
 
 def test_unknown_project_is_404(stack: Stack) -> None:
     assert stack.client.get("/projects/00000000-0000-0000-0000-000000000000").status_code == 404
+    assert stack.client.delete("/projects/00000000-0000-0000-0000-000000000000").status_code == 404
+
+
+def _set_status(stack: Stack, project_id: str, status: ProjectStatus, age_min: int = 0) -> None:
+    async def update() -> None:
+        async with stack.db.sessionmaker() as session, session.begin():
+            project = await session.get_one(Project, uuid.UUID(project_id))
+            project.status = status
+            project.updated_at = datetime.now(UTC) - timedelta(minutes=age_min)
+
+    stack.portal.call(update)
+
+
+def test_delete_removes_project_events_and_files(stack: Stack) -> None:
+    project = _upload(stack, blv=("lv.pdf", b"%PDF-1.7 test", "application/pdf")).json()
+    pid = project["id"]
+    keys = list(project["artifacts"].values())
+    assert _wait_until(lambda: bool(stack.client.get(f"/projects/{pid}").json()["events"]))
+
+    # Läuft noch → abgelehnt, nichts gelöscht
+    assert stack.client.delete(f"/projects/{pid}").status_code == 409
+    assert stack.portal.call(stack.storage.exists, keys[0])
+
+    _set_status(stack, pid, ProjectStatus.COMPLETED)
+    assert stack.client.delete(f"/projects/{pid}").status_code == 204
+
+    assert stack.client.get(f"/projects/{pid}").status_code == 404
+    assert stack.client.get("/projects").json() == []
+    assert not any(stack.portal.call(stack.storage.exists, key) for key in keys)
+
+
+def test_stuck_project_can_be_deleted(stack: Stack) -> None:
+    pid = _upload(stack).json()["id"]
+    _set_status(stack, pid, ProjectStatus.PROCESSING, age_min=45)  # hängt seit 45 min
+    assert stack.client.delete(f"/projects/{pid}").status_code == 204

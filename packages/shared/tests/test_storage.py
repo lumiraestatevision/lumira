@@ -41,6 +41,20 @@ async def test_json_and_bytes(storage: S3Storage) -> None:
     assert await storage.get_bytes("b.bin") == b"\x00\x01"
 
 
+async def test_delete_prefix_removes_only_that_project(storage: S3Storage) -> None:
+    await storage.ensure_bucket()
+    for key in ("projects/a/upload/plan.pdf", "projects/a/parser/x.json", "projects/ab/keep.json"):
+        await storage.put_bytes(key, b"x")
+
+    assert await storage.delete_prefix("projects/a/") == 2
+
+    assert not await storage.exists("projects/a/upload/plan.pdf")
+    assert await storage.exists("projects/ab/keep.json")  # gleicher Anfang, anderes Projekt
+    assert await storage.delete_prefix("projects/a/") == 0
+    with pytest.raises(ValueError, match="Präfix"):
+        await storage.delete_prefix("projects/a")  # ohne "/" träfe es auch projects/ab
+
+
 async def test_missing_object_raises(storage: S3Storage) -> None:
     await storage.ensure_bucket()
     with pytest.raises(ObjectNotFoundError):
