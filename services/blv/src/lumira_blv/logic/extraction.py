@@ -4,10 +4,12 @@ Das Schema ist bewusst flach und ohne Validierungs-Constraints: Die strukturiert
 der API garantiert gültiges JSON in dieser Form. Fachliche Nachbearbeitung passiert
 deterministisch in ``to_blv_result``:
 
+- Bereinigung: Haustechnik, Rohbau, Lage, Kategorie, Dubletten (siehe cleanup.py)
 - Farben: RAL-Tabelle > Farbangabe im LV > gekennzeichnete Annahme (siehe colors.py)
 - Varianten: Das LLM nennt für Nicht-Standard-Varianten nur die ABWEICHENDEN Materialien;
-  alles Übrige wird aus der Standardvariante übernommen
-- Referenzen, Dubletten und genau eine Standardvariante werden geprüft
+  alles Übrige wird aus der Standardvariante übernommen. Optionen ohne eigenes Material
+  (z. B. "Schornstein") sehen aus wie der Standard und werden nur als Hinweis geführt.
+- Referenzen und genau eine Standardvariante werden geprüft
 """
 
 from __future__ import annotations
@@ -18,6 +20,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel, Field
 
+from lumira_blv.logic.cleanup import clean_extraction
 from lumira_blv.logic.colors import resolve_color
 from lumira_shared.models import (
     BLVResult,
@@ -121,13 +124,9 @@ def _choose_default(variants: list[ExtractedVariant]) -> int | None:
 def to_blv_result(
     extraction: BLVExtraction, *, project_id: uuid.UUID, source_key: str, extracted_by: str
 ) -> BLVResult:
-    notes = list(extraction.notes)
-    materials: dict[str, Material] = {}
-    for m in extraction.materials:
-        if m.id in materials:
-            notes.append(f"Doppelte Material-ID '{m.id}' verworfen")
-            continue
-        materials[m.id] = _to_material(m)
+    extraction, cleanup_notes = clean_extraction(extraction)
+    notes = [*extraction.notes, *cleanup_notes]
+    materials = {m.id: _to_material(m) for m in extraction.materials}
 
     def known(variant: ExtractedVariant) -> list[str]:
         unknown = [i for i in variant.material_ids if i not in materials]
@@ -157,8 +156,12 @@ def to_blv_result(
     standard = [materials[i] for i in ids[default_index]]
 
     variants: list[EquipmentVariant] = []
+    without_material: list[str] = []
     for n, v in enumerate(raw):
         variant_ids = ids[n]
+        if n != default_index and not variant_ids:
+            without_material.append(v.name)
+            continue
         if n != default_index:
             own = [materials[i] for i in variant_ids]
             inherited = [s.id for s in standard if not any(_replaces(o, s) for o in own)]
@@ -175,6 +178,11 @@ def to_blv_result(
             )
         )
 
+    if without_material:
+        notes.append(
+            "Optionen ohne eigenes Material (im 3D-Modell wie Standard): "
+            + ", ".join(without_material)
+        )
     assumed = [m.name for m in materials.values() if m.color_source is ColorSource.ASSUMED]
     if assumed:
         notes.append(

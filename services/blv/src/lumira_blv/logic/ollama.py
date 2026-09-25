@@ -21,6 +21,7 @@ import httpx
 import pypdfium2 as pdfium
 from pydantic import ValidationError
 
+from lumira_blv.logic.cleanup import material_key
 from lumira_blv.logic.extraction import BLVExtraction, ExtractedMaterial, ExtractedVariant
 from lumira_blv.logic.prompts import SYSTEM_PROMPT, USER_INSTRUCTION
 from lumira_shared import NonRetryableError, get_logger
@@ -122,10 +123,6 @@ def _halve(text: str) -> list[str]:
 
 
 # ------------------------------------------------------------------ Teilergebnisse zusammenführen
-def _material_key(m: ExtractedMaterial) -> tuple[object, ...]:
-    return (m.category, m.location, m.name.casefold().strip(), tuple(sorted(m.room_types)))
-
-
 def _standard_ids(part: BLVExtraction) -> list[str]:
     """Material-IDs der Grundausstattung eines Abschnitts."""
     flagged = [v for v in part.variants if v.is_default]
@@ -158,7 +155,7 @@ def merge(parts: Sequence[BLVExtraction]) -> BLVExtraction:
         for m in part.materials:
             if m.id in mapping:
                 continue
-            key = _material_key(m)
+            key = material_key(m)
             if key not in by_key:
                 by_key[key] = f"a{n}-{m.id}"
                 materials.append(m.model_copy(update={"id": by_key[key]}))
