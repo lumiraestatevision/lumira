@@ -2,6 +2,7 @@
 # Prüft COMPOSE_PROFILES (+ PIPELINE_VR_ENABLED, BLV_PROVIDER) und gibt den recognizer-Service des aktiven
 # Profils aus: "recognizer" (cpu) oder "recognizer-gpu" (gpu). Genutzt vom Makefile.
 #   --inactive  gibt stattdessen die Services INAKTIVER Profile aus (zum Stoppen vor "up")
+#   --profiles  gibt die geprüften Profile aus (für "make demo")
 set -euo pipefail
 mode="${1:-}"
 cd "$(dirname "$0")/.."
@@ -40,6 +41,14 @@ fi
 if has llm && [ "${blv_provider,,}" != "ollama" ]; then
   echo "⚠ Profil 'llm' aktiv, aber BLV_PROVIDER=${blv_provider:-anthropic} – Ollama läuft ungenutzt." >&2
 fi
+if has demo; then
+  # Ohne Kommentar-Abschneiden lesen und nie ausgeben – nur die Länge prüfen.
+  password="${DEMO_PASSWORD:-$(grep -E '^DEMO_PASSWORD=' .env 2>/dev/null | head -1 | cut -d= -f2- || true)}"
+  if [ "${#password}" -lt 12 ]; then
+    echo "✘ Die Demo ist öffentlich erreichbar und braucht DEMO_PASSWORD (mind. 12 Zeichen) in .env." >&2
+    exit 1
+  fi
+fi
 
 if has gpu; then
   active=recognizer-gpu inactive=recognizer
@@ -53,7 +62,10 @@ fi
 if [ "$mode" = "--inactive" ]; then
   has vr || inactive="$inactive unreal"
   has llm || inactive="$inactive ollama"
+  has demo || inactive="$inactive tunnel demo-proxy frontend-demo"
   echo "$inactive"
+elif [ "$mode" = "--profiles" ]; then
+  echo "$profiles"
 else
   echo "$active"
 fi

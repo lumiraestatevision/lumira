@@ -1,0 +1,39 @@
+# Eingangstür der Demo (Profil demo): Passwortschutz + ein gemeinsamer Ursprung für
+# Frontend und API. Der Cloudflare-Tunnel leitet alle Anfragen hierher – sonst ist von
+# außen nichts erreichbar (alle anderen Ports hängen nur an 127.0.0.1).
+{
+	admin localhost:2019
+	auto_https off # TLS macht der Tunnel
+}
+
+:8080 {
+	# Cloudflare lässt im Gratistarif höchstens 100 MB pro Anfrage durch.
+	request_body {
+		max_size 100MB
+	}
+
+	basic_auth {
+		{$DEMO_USER:lumira} {$DEMO_PASSWORD_HASH}
+	}
+
+	header {
+		X-Robots-Tag "noindex, nofollow"
+		Referrer-Policy "no-referrer"
+		X-Content-Type-Options "nosniff"
+		-Server
+	}
+
+	# /api/projects → backend /projects
+	handle_path /api/* {
+		reverse_proxy backend:8000
+	}
+
+	handle {
+		reverse_proxy frontend-demo:3000
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}

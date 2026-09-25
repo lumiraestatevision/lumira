@@ -80,6 +80,26 @@ automatisch neu (`uvicorn --reload`). Neue Abhängigkeiten erfordern `make build
 pre-commit prüft bei jedem Commit ruff (Lint + Format), pyright, `uv.lock` und verhindert,
 dass `.env` oder private Schlüssel committet werden – mit denselben Versionen wie `make check`.
 
+## Demo übers Internet (kostenlos)
+
+Für Vorführungen läuft Lumira auf diesem Rechner und wird über einen Cloudflare Quick Tunnel
+erreichbar – ohne Konto, ohne Kosten, mit HTTPS:
+
+```bash
+make demo        # startet Tunnel + Passwortschutz und zeigt die Adresse https://….trycloudflare.com
+make demo-url    # Adresse erneut anzeigen
+make demo-stop   # Demo vom Internet trennen (lokal läuft alles weiter)
+```
+
+- Vorher in `.env` ein `DEMO_PASSWORD` setzen (mind. 12 Zeichen); Benutzer ist `DEMO_USER`.
+  Jede Seite und jeder API-Aufruf verlangt die Anmeldung. Nur der Demo-Eingang (`demo-proxy`)
+  ist erreichbar, alle anderen Ports bleiben auf `127.0.0.1`.
+- Die Adresse ändert sich bei jedem Start, und die Demo ist nur erreichbar, solange der PC läuft.
+  Uploads über den Tunnel: höchstens 100 MB. Quick Tunnels haben keine Verfügbarkeitszusage –
+  für einen Dauerbetrieb später auf einen Server umziehen.
+- Test über den Tunnel: `LUMIRA_API_URL=https://….trycloudflare.com/api LUMIRA_API_USER=lumira
+  LUMIRA_API_PASSWORD=… make test-integration`
+
 ## Konfiguration (`.env`)
 
 `make setup` legt `.env` aus `.env.example` an; dort ist jede Variable erklärt. Wichtig:

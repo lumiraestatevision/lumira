@@ -9,6 +9,8 @@
 #   vr   Unreal-Stub; ohne ihn schließt das backend Projekte nach model.generated ab
 #        (PIPELINE_VR_ENABLED=false in .env)
 #   llm  lokales LLM (Ollama) für blv mit BLV_PROVIDER=ollama (NVIDIA-GPU nötig)
+#   demo öffentliche Demo per Cloudflare-Tunnel mit Passwort – nicht dauerhaft in .env,
+#        sondern bei Bedarf: make demo / make demo-stop
 #
 # Alle Ports sind nur an 127.0.0.1 gebunden – nicht aus dem LAN erreichbar.
 
@@ -427,6 +429,54 @@ services:
       timeout: 5s
       retries: 5
       start_period: 60s
+
+  # ================================================================ Demo übers Internet (Profil demo)
+  # make demo → Cloudflare Quick Tunnel (ohne Konto) → demo-proxy (Passwort) → Frontend/API.
+  # Die öffentliche Adresse ändert sich bei jedem Start: make demo-url
+  frontend-demo:
+    profiles: [demo]
+    build:
+      context: ./frontend
+      target: runtime  # Produktions-Build: schneller als der Entwicklungsserver
+      args:
+        NEXT_PUBLIC_API_URL: /api  # gleicher Ursprung, demo-proxy leitet an das backend weiter
+    image: lumira/frontend:demo
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  demo-proxy:
+    image: caddy:2.11-alpine  # Apache-2.0
+    profiles: [demo]
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "/etc/caddy/entrypoint.sh"]
+    environment:
+      DEMO_USER: ${DEMO_USER:-lumira}
+      DEMO_PASSWORD: ${DEMO_PASSWORD:-}
+    ports:
+      - "127.0.0.1:8080:8080"  # lokal prüfen: http://localhost:8080
+    volumes:
+      - ./infra/demo/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./infra/demo/entrypoint.sh:/etc/caddy/entrypoint.sh:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:2019/config/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    depends_on:
+      frontend-demo:
+        condition: service_healthy
+
+  tunnel:
+    image: cloudflare/cloudflared:2026.9.3  # Apache-2.0
+    profiles: [demo]
+    restart: unless-stopped
+    command: ["tunnel", "--no-autoupdate", "--url", "http://demo-proxy:8080"]
+    depends_on:
+      demo-proxy:
+        condition: service_healthy
 
 volumes:
   postgres-data:

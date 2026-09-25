@@ -12,6 +12,9 @@ import pytest
 
 API_URL = os.environ.get("LUMIRA_API_URL", "http://localhost:8000")
 FINAL_TIMEOUT_S = float(os.environ.get("LUMIRA_E2E_TIMEOUT", "300"))
+# Für die passwortgeschützte Demo: LUMIRA_API_URL=https://….trycloudflare.com/api
+_USER, _PASSWORD = os.environ.get("LUMIRA_API_USER"), os.environ.get("LUMIRA_API_PASSWORD")
+AUTH = (_USER, _PASSWORD) if _USER and _PASSWORD else None
 
 
 class Pipeline:
@@ -48,7 +51,7 @@ class Pipeline:
 
 @pytest.fixture(scope="session")
 def pipeline() -> Iterator[Pipeline]:
-    client = httpx.Client(base_url=API_URL, timeout=60)
+    client = httpx.Client(base_url=API_URL, timeout=60, auth=AUTH)
     try:
         ready = client.get("/health/ready")
     except httpx.ConnectError:

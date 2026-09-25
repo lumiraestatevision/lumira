@@ -8,7 +8,7 @@ SHELL := /usr/bin/env bash
 .DEFAULT_GOAL := help
 
 COMPOSE   := docker compose
-ALL_PROFILES := --profile cpu --profile gpu --profile vr --profile llm
+ALL_PROFILES := --profile cpu --profile gpu --profile vr --profile llm --profile demo
 PACKAGES  := packages/shared $(wildcard services/*)
 SERVICE   ?=
 TORCH     ?= cpu
@@ -72,6 +72,30 @@ up: .env ## Stack starten (Profile aus .env) und warten, bis alles gesund ist
 	$(COMPOSE) up -d --wait --wait-timeout 600 --remove-orphans
 	@$(MAKE) --no-print-directory ps
 	@echo -e "\n  Web-UI      http://localhost:3000\n  API-Doku    http://localhost:8000/docs\n  MinIO       http://localhost:9001"
+
+.PHONY: demo
+demo: .env ## Demo übers Internet freigeben (Cloudflare-Tunnel, Passwort aus .env)
+	@profiles="$$(bash scripts/check-profiles.sh --profiles)" || exit 1; \
+	  COMPOSE_PROFILES="$$profiles,demo" $(MAKE) --no-print-directory up
+	@$(MAKE) --no-print-directory demo-url
+
+.PHONY: demo-url
+demo-url: ## Öffentliche Adresse der laufenden Demo anzeigen
+	@[ -n "$$($(COMPOSE) --profile demo ps --status running -q tunnel)" ] \
+	  || { echo "✘ Die Demo läuft nicht – starten mit: make demo"; exit 1; }
+	@# Nur Log seit dem letzten Start: ältere Einträge enthalten frühere, tote Adressen.
+	@since="$$(docker inspect -f '{{.State.StartedAt}}' "$$($(COMPOSE) --profile demo ps -q tunnel)")"; \
+	url=""; for _ in $$(seq 1 30); do \
+	  url="$$($(COMPOSE) --profile demo logs --since "$$since" tunnel 2>/dev/null \
+	    | grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' | tail -1 || true)"; \
+	  [ -n "$$url" ] && break; sleep 2; \
+	done; \
+	[ -n "$$url" ] || { echo "✘ Keine Tunnel-Adresse gefunden – läuft die Demo? (make demo)"; exit 1; }; \
+	echo -e "\n  Demo öffentlich:  $$url\n  Anmeldung:        DEMO_USER / DEMO_PASSWORD aus .env\n  Beenden:          make demo-stop\n"
+
+.PHONY: demo-stop
+demo-stop: ## Demo vom Internet trennen (der Stack läuft lokal weiter)
+	$(COMPOSE) --profile demo stop tunnel demo-proxy frontend-demo
 
 .PHONY: down
 down: ## Stack stoppen (Daten bleiben erhalten)
