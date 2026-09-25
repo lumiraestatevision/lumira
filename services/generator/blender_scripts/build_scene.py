@@ -102,10 +102,25 @@ def prism(name, footprint, height):
     return obj
 
 
+WALL_CROWN_COLOR = "#4A4A4A"  # Wandkrone dunkel wie im Architekturmodell
+
+
+def apply_wall_materials(obj, finish):
+    """Wandseiten in der Wandfarbe, die Oberseite (Wandkrone) dunkel: von oben ist der
+    Grundriss so sofort lesbar – auch in Viewern ohne Schatten/Umgebungsverdeckung."""
+    mesh = obj.data
+    mesh.materials.append(material(finish["name"], finish["color"], roughness=0.8))
+    mesh.materials.append(material("Wandkrone", WALL_CROWN_COLOR, roughness=0.9))
+    top = max(v.co.z for v in mesh.vertices)
+    for polygon in mesh.polygons:
+        if polygon.normal.z > 0.99 and abs(polygon.center.z - top) < 1e-5:
+            polygon.material_index = 1
+
+
 def build_wall(wall, finish):
     if wall.get("footprint"):
         obj = prism(f"Wall_{wall['id']}", wall["footprint"], wall["height"] * MM)
-        obj.data.materials.append(material(finish["name"], finish["color"], roughness=0.8))
+        apply_wall_materials(obj, finish)
         return 0
     (x1, y1), (x2, y2) = wall["start"], wall["end"]
     dx, dy = (x2 - x1) * MM, (y2 - y1) * MM
@@ -141,7 +156,7 @@ def build_wall(wall, finish):
         for cutter in cutters:
             bpy.data.objects.remove(cutter, do_unlink=True)
 
-    obj.data.materials.append(material(finish["name"], finish["color"], roughness=0.8))
+    apply_wall_materials(obj, finish)
     return len(cutters)
 
 

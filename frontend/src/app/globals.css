@@ -189,8 +189,9 @@ button:disabled {
 
 model-viewer {
   width: 100%;
-  height: 420px;
-  background: var(--bg);
+  height: 480px;
+  /* leichter Verlauf statt flacher Fläche – das Modell „steht“ im Raum */
+  background: radial-gradient(ellipse at 50% 40%, #3a3f47 0%, #1b1d21 75%);
   border-radius: 8px;
 }
 
