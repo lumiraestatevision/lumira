@@ -45,6 +45,11 @@ class BaseServiceSettings(BaseSettings):
     consumer_claim_idle_ms: int = Field(default=30_000, ge=0)
     consumer_max_attempts: int = Field(default=3, ge=1)
 
+    @property
+    def redis_socket_timeout_s(self) -> float:
+        """Lese-Timeout der Redis-Verbindung: Blockierzeit des Consumers + 10 s Puffer."""
+        return (self.consumer_block_ms or 0) / 1000 + 10.0
+
     def consumer_options(self) -> ConsumerOptions:
         return ConsumerOptions(
             batch_size=self.consumer_batch_size,

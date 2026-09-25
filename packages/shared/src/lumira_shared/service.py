@@ -85,7 +85,15 @@ def create_service_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        redis_client = redis or Redis.from_url(settings.redis_url, decode_responses=True)
+        redis_client = redis or Redis.from_url(
+            settings.redis_url,
+            decode_responses=True,
+            # redis-py 8 bricht Lesevorgänge nach 5 s ab – genau so lange blockiert XREADGROUP.
+            # Beim Zusammentreffen gingen gerade zugestellte Events verloren und kamen erst nach
+            # consumer_claim_idle_ms wieder. Deshalb deutlich länger als die Blockierzeit.
+            socket_timeout=settings.redis_socket_timeout_s,
+            socket_connect_timeout=5,
+        )
         publisher = StreamPublisher(redis_client)
         ctx = ServiceContext(
             settings=settings,

@@ -44,6 +44,11 @@ def test_follow_up_carries_artifacts_and_causation(project_id: UUID) -> None:
     )
     assert parsed.project_id == project_id
     assert parsed.causation_id == created.event_id
+    # Durchlauf-Kennung: project.created eröffnet ihn, alle Folgeevents tragen sie weiter
+    assert created.run_id == created.event_id
+    assert parsed.run_id == created.event_id
+    failed = parsed.failed(producer="x", error_type="E", message="m", attempts=1, retryable=False)
+    assert failed.run_id == created.event_id
     assert parsed.artifacts == {
         "floor_plan_source": "projects/x/upload/plan.pdf",
         "blv_source": "projects/x/upload/blv.pdf",

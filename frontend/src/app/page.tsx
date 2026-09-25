@@ -11,6 +11,7 @@ import {
   createProject,
   deleteProject,
   getProject,
+  rerunProject,
   listProjects,
 } from "@/lib/api";
 
@@ -109,23 +110,36 @@ export default function Home() {
 function ProjectRow({ project, onDeleted }: { project: ProjectDetail; onDeleted: () => Promise<void> }) {
   const done = new Set(project.events.map((e) => e.type));
   const hasModel = "model_gltf" in project.artifacts;
-  const [deleting, setDeleting] = useState(false);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<"delete" | "rerun" | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const running = project.status === "processing";
 
-  async function onDelete() {
-    if (!window.confirm(`Projekt „${project.name}“ mit allen Dateien und dem 3D-Modell endgültig löschen?`)) {
-      return;
-    }
-    setDeleting(true);
-    setDeleteError(null);
+  async function run(kind: "delete" | "rerun", question: string, action: () => Promise<unknown>) {
+    if (!window.confirm(question)) return;
+    setBusy(kind);
+    setActionError(null);
     try {
-      await deleteProject(project.id);
+      await action();
       await onDeleted();
     } catch (e) {
-      setDeleteError((e as Error).message);
-      setDeleting(false);
+      setActionError((e as Error).message);
+    } finally {
+      setBusy(null);
     }
   }
+
+  const onRerun = () =>
+    run(
+      "rerun",
+      `Projekt „${project.name}“ mit denselben Dateien neu berechnen? Das bisherige 3D-Modell wird ersetzt.`,
+      () => rerunProject(project.id),
+    );
+  const onDelete = () =>
+    run(
+      "delete",
+      `Projekt „${project.name}“ mit allen Dateien und dem 3D-Modell endgültig löschen?`,
+      () => deleteProject(project.id),
+    );
 
   return (
     <article className="project">
@@ -135,20 +149,33 @@ function ProjectRow({ project, onDeleted }: { project: ProjectDetail; onDeleted:
           <span className={`badge ${project.status}`}>{STATUS_LABEL[project.status]}</span>
           <button
             type="button"
+            className="secondary"
+            onClick={() => void onRerun()}
+            disabled={busy !== null || running}
+            title={
+              running
+                ? "Möglich, sobald das Projekt fertig oder fehlgeschlagen ist"
+                : "Mit denselben Dateien neu berechnen (z. B. nach einem Lumira-Update)"
+            }
+          >
+            {busy === "rerun" ? "Wird gestartet …" : "Neu berechnen"}
+          </button>
+          <button
+            type="button"
             className="danger"
             onClick={() => void onDelete()}
-            disabled={deleting || project.status === "processing"}
+            disabled={busy !== null || running}
             title={
-              project.status === "processing"
+              running
                 ? "Löschen ist möglich, sobald das Projekt fertig oder fehlgeschlagen ist"
                 : "Projekt und alle Dateien löschen"
             }
           >
-            {deleting ? "Wird gelöscht …" : "Löschen"}
+            {busy === "delete" ? "Wird gelöscht …" : "Löschen"}
           </button>
         </span>
       </header>
-      {deleteError && <p className="error">{deleteError}</p>}
+      {actionError && <p className="error">{actionError}</p>}
       <ol className="steps">
         {PIPELINE_STEPS.map((step) => (
           <li key={step} className={done.has(step) ? "done" : undefined}>

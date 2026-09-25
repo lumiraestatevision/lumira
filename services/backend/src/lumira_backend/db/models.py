@@ -64,6 +64,9 @@ class Project(Base):
         index=True,
     )
     current_step: Mapped[str | None] = mapped_column(String(50))
+    # Aktueller Pipeline-Durchlauf (event_id des project.created) – Events älterer Durchläufe
+    # (z. B. verspätet nach „Neu berechnen“) verwirft der Orchestrator.
+    run_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
     artifacts: Mapped[dict[str, str]] = mapped_column(JsonType, default=dict)
     error: Mapped[dict[str, Any] | None] = mapped_column(JsonType)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

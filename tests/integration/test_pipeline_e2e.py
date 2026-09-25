@@ -89,6 +89,25 @@ def test_finished_project_can_be_deleted_with_all_files(pipeline: Pipeline) -> N
     assert project_id not in listed
 
 
+def test_rerun_recomputes_the_same_project(pipeline: Pipeline) -> None:
+    project_id = pipeline.create(
+        "E2E Neu berechnen", {"floor_plan": ("grundriss.dxf", sample_dxf(), "application/dxf")}
+    )
+    first = pipeline.wait_until_finished(project_id)
+    assert first["status"] == "completed", first["error"]
+
+    response = pipeline.client.post(f"/projects/{project_id}/rerun")
+    assert response.status_code == 202, response.text
+    second = pipeline.wait_until_finished(project_id)
+
+    assert second["status"] == "completed", second["error"]
+    types = pipeline.event_types(second)
+    assert types == _expected_chain(types)  # frischer Verlauf, nicht doppelt
+    first_ids = {e["event_id"] for e in first["events"]}
+    assert not first_ids & {e["event_id"] for e in second["events"]}
+    _assert_valid_glb(pipeline.artifact(project_id, "model_gltf").content)
+
+
 def test_cad_pdf_with_filled_walls_is_read_exactly(pipeline: Pipeline) -> None:
     """CAD-Export (Wände grau gefüllt, Räume farbig): Maße, Öffnungen und Räume 1:1."""
     project_id = pipeline.create(

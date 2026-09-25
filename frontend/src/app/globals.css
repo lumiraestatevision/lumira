@@ -160,6 +160,24 @@ button:disabled {
   gap: 10px;
 }
 
+button.secondary {
+  padding: 3px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid var(--border);
+}
+
+button.secondary:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+button.secondary:disabled {
+  cursor: not-allowed;
+}
+
 /* Zurückhaltend, damit er nicht versehentlich geklickt wird – rot erst beim Zeigen */
 button.danger {
   padding: 3px 12px;

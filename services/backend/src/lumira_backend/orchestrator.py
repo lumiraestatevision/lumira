@@ -28,6 +28,10 @@ def build_handlers(db: Database, settings: BackendSettings) -> dict[EventType, C
                 if project is None:
                     ctx.log.warning("orchestrator.unknown_project")
                     return None
+                if project.run_id and event.run_id and event.run_id != project.run_id:
+                    # Verspätetes Event eines früheren Durchlaufs (Projekt wurde neu berechnet)
+                    ctx.log.info("orchestrator.stale_run", run_id=str(event.run_id))
+                    return None
 
                 already_seen = await session.scalar(
                     select(ProjectEvent.id).where(ProjectEvent.event_id == event.event_id)

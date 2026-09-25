@@ -18,15 +18,24 @@ AUTH = (_USER, _PASSWORD) if _USER and _PASSWORD else None
 
 
 class Pipeline:
-    """Dünner Client für die Projekt-API des backends."""
+    """Dünner Client für die Projekt-API des backends. Merkt sich angelegte Projekte, damit
+    sie nach dem Testlauf wieder gelöscht werden (die Projektliste bleibt übersichtlich)."""
 
     def __init__(self, client: httpx.Client) -> None:
         self.client = client
+        self.created: list[str] = []
 
     def create(self, name: str, files: dict[str, tuple[str, bytes, str]]) -> str:
         response = self.client.post("/projects", data={"name": name}, files=files)
         assert response.status_code == 201, response.text
+        self.created.append(response.json()["id"])
         return response.json()["id"]
+
+    def cleanup(self) -> None:
+        for project_id in self.created:
+            if self.client.get(f"/projects/{project_id}").status_code == 200:
+                self.wait_until_finished(project_id)
+                self.client.delete(f"/projects/{project_id}")
 
     def wait_until_finished(self, project_id: str) -> dict[str, Any]:
         """Pollt, bis das Projekt nicht mehr 'processing' ist."""
@@ -60,5 +69,7 @@ def pipeline() -> Iterator[Pipeline]:
     if ready.status_code != 200:
         client.close()
         pytest.fail(f"backend nicht bereit: {ready.text}")
-    yield Pipeline(client)
+    pipeline = Pipeline(client)
+    yield pipeline
+    pipeline.cleanup()
     client.close()

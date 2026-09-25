@@ -19,12 +19,15 @@ from fastapi import (
     status,
 )
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from lumira_backend.api.schemas import ProjectDetail, ProjectRead
 from lumira_backend.config import BackendSettings
 from lumira_backend.db import Database, Project, ProjectStatus
 from lumira_shared import (
+    Artifact,
+    Event,
     ObjectNotFoundError,
     ServiceContext,
     artifact_key,
@@ -39,6 +42,9 @@ PLAN_EXTENSIONS = {".pdf", ".dxf", ".dwg"}
 BLV_EXTENSIONS = {".pdf"}
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 STUCK_AFTER = timedelta(minutes=30)  # länger „in Bearbeitung“ = hängt → darf gelöscht werden
+UPLOAD_ARTIFACTS = {Artifact.FLOOR_PLAN_SOURCE, Artifact.BLV_SOURCE, Artifact.REFERENCE_IMAGES}
+# Ordner unter projects/<id>/, die die Services schreiben (siehe STEP in den Handlern)
+PIPELINE_STEP_FOLDERS = ("parser", "recognizer", "classifier", "blv", "generator", "unreal")
 
 Ctx = Annotated[ServiceContext, Depends(get_context)]
 
@@ -111,10 +117,22 @@ async def create_project(
     )
     async with db.sessionmaker() as session, session.begin():
         project = Project(
-            id=project_id, name=name, status=ProjectStatus.PROCESSING, artifacts=event.artifacts
+            id=project_id,
+            name=name,
+            status=ProjectStatus.PROCESSING,
+            artifacts=event.artifacts,
+            run_id=event.run_id,
         )
         session.add(project)
 
+    await _publish_or_fail(ctx, db, event, project_id)
+    async with db.sessionmaker() as session:
+        return ProjectRead.model_validate(await session.get_one(Project, project_id))
+
+
+async def _publish_or_fail(
+    ctx: ServiceContext, db: Database, event: Event, project_id: uuid.UUID
+) -> None:
     try:
         await ctx.publisher.publish(event)
     except Exception as exc:
@@ -125,9 +143,6 @@ async def create_project(
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE, "Event-Bus nicht erreichbar"
         ) from exc
-
-    async with db.sessionmaker() as session:
-        return ProjectRead.model_validate(await session.get_one(Project, project_id))
 
 
 @router.get("")
@@ -150,28 +165,69 @@ async def get_project(project_id: uuid.UUID, db: Db) -> ProjectDetail:
         return ProjectDetail.model_validate(project)
 
 
+async def _load_idle_project(session: AsyncSession, project_id: uuid.UUID) -> Project:
+    """Projekt samt Events laden; läuft die Pipeline noch, wird abgelehnt – sonst schrieben
+    die Services danach wieder Dateien. Hängt ein Projekt länger als ``STUCK_AFTER``, gilt es
+    als frei."""
+    # Events mitladen: das ORM löscht sie mit (async kennt kein Nachladen beim Löschen).
+    project = await session.scalar(
+        select(Project).where(Project.id == project_id).options(selectinload(Project.events))
+    )
+    if project is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Projekt nicht gefunden")
+    updated = project.updated_at
+    if updated.tzinfo is None:  # SQLite (Tests) speichert ohne Zeitzone
+        updated = updated.replace(tzinfo=UTC)
+    if project.status is ProjectStatus.PROCESSING and datetime.now(UTC) - updated < STUCK_AFTER:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Projekt wird noch berechnet – bitte warten, bis es fertig oder fehlgeschlagen ist",
+        )
+    return project
+
+
+@router.post("/{project_id}/rerun", status_code=status.HTTP_202_ACCEPTED)
+async def rerun_project(project_id: uuid.UUID, ctx: Ctx, db: Db) -> ProjectRead:
+    """Projekt mit denselben Uploads neu berechnen (z. B. nach einem Lumira-Update).
+
+    Behalten werden die Originaldateien; Zwischenergebnisse, 3D-Modelle und der Verlauf werden
+    verworfen, dann startet die Pipeline mit einem neuen project.created.
+    """
+    settings = cast(BackendSettings, ctx.settings)
+    async with db.sessionmaker() as session, session.begin():
+        project = await _load_idle_project(session, project_id)
+        uploads = {k: v for k, v in project.artifacts.items() if k in UPLOAD_ARTIFACTS}
+        if Artifact.FLOOR_PLAN_SOURCE not in uploads:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT, "Originaldateien fehlen – bitte neu hochladen"
+            )
+        event = project_created(
+            project_id,
+            floor_plan_key=uploads[Artifact.FLOOR_PLAN_SOURCE],
+            blv_key=uploads.get(Artifact.BLV_SOURCE),
+            reference_images_prefix=uploads.get(Artifact.REFERENCE_IMAGES),
+            producer=settings.service_name,
+        )
+        project.events.clear()  # delete-orphan: alter Verlauf wird gelöscht
+        project.artifacts = uploads
+        project.status = ProjectStatus.PROCESSING
+        project.error = None
+        project.current_step = None
+        project.run_id = event.run_id  # verspätete Events des alten Durchlaufs → verworfen
+    for step in PIPELINE_STEP_FOLDERS:
+        await ctx.storage.delete_prefix(f"projects/{project_id}/{step}/")
+
+    await _publish_or_fail(ctx, db, event, project_id)
+    ctx.log.info("project.rerun", project_id=str(project_id))
+    async with db.sessionmaker() as session:
+        return ProjectRead.model_validate(await session.get_one(Project, project_id))
+
+
 @router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_project(project_id: uuid.UUID, ctx: Ctx, db: Db) -> Response:
-    """Projekt samt aller Dateien (Uploads, Zwischenergebnisse, 3D-Modelle) endgültig löschen.
-
-    Läuft die Pipeline noch, wird abgelehnt – sonst schrieben die Services danach wieder
-    Dateien in den Speicher. Hängt ein Projekt länger als ``STUCK_AFTER``, darf es weg.
-    """
+    """Projekt samt aller Dateien (Uploads, Zwischenergebnisse, 3D-Modelle) endgültig löschen."""
     async with db.sessionmaker() as session, session.begin():
-        # Events mitladen: das ORM löscht sie mit (async kennt kein Nachladen beim Löschen).
-        project = await session.scalar(
-            select(Project).where(Project.id == project_id).options(selectinload(Project.events))
-        )
-        if project is None:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "Projekt nicht gefunden")
-        updated = project.updated_at
-        if updated.tzinfo is None:  # SQLite (Tests) speichert ohne Zeitzone
-            updated = updated.replace(tzinfo=UTC)
-        if project.status is ProjectStatus.PROCESSING and datetime.now(UTC) - updated < STUCK_AFTER:
-            raise HTTPException(
-                status.HTTP_409_CONFLICT,
-                "Projekt wird noch berechnet – bitte warten, bis es fertig oder fehlgeschlagen ist",
-            )
+        project = await _load_idle_project(session, project_id)
         await session.delete(project)
     files = await ctx.storage.delete_prefix(f"projects/{project_id}/")
     ctx.log.info("project.deleted", project_id=str(project_id), files=files)

@@ -100,6 +100,11 @@ class Event(LumiraModel):
     producer: str
     occurred_at: AwareDatetime = Field(default_factory=lambda: datetime.now(UTC))
     causation_id: UUID | None = Field(default=None, description="event_id des auslösenden Events")
+    run_id: UUID | None = Field(
+        default=None,
+        description="Pipeline-Durchlauf = event_id seines project.created; wird an alle Folgeevents "
+        "weitergegeben. Das backend verwirft Events früherer Durchläufe (Neu berechnen).",
+    )
     schema_version: Literal[1] = 1
     artifacts: dict[str, str] = Field(default_factory=dict)
     data: dict[str, JsonValue] = Field(default_factory=dict)
@@ -132,6 +137,7 @@ class Event(LumiraModel):
             project_id=self.project_id,
             producer=producer,
             causation_id=self.event_id,
+            run_id=self.run_id,
             artifacts={**self.artifacts, **(artifacts or {})},
             data=dict(data or {}),
         )
@@ -150,6 +156,7 @@ class Event(LumiraModel):
             project_id=self.project_id,
             producer=producer,
             causation_id=self.event_id,
+            run_id=self.run_id,
             artifacts=dict(self.artifacts),
             error=ErrorInfo(
                 step=producer,
@@ -184,7 +191,10 @@ def project_created(
         artifacts[Artifact.BLV_SOURCE] = blv_key
     if reference_images_prefix:
         artifacts[Artifact.REFERENCE_IMAGES] = reference_images_prefix
+    event_id = uuid4()
     return Event(
+        event_id=event_id,
+        run_id=event_id,  # dieses Event eröffnet einen neuen Durchlauf
         type=EventType.PROJECT_CREATED,
         project_id=project_id,
         producer=producer,

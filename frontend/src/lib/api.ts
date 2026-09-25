@@ -53,6 +53,8 @@ export const getProject = (id: string) => request<ProjectDetail>(`/projects/${id
 export const createProject = (form: FormData) =>
   request<Project>("/projects", { method: "POST", body: form });
 
+export const rerunProject = (id: string) => request<Project>(`/projects/${id}/rerun`, { method: "POST" });
+
 export async function deleteProject(id: string): Promise<void> {
   const response = await fetch(`${API_URL}/projects/${id}`, { method: "DELETE" });
   if (!response.ok) {
