@@ -35,3 +35,14 @@ SOFTWARE.
 
 „RAL" ist eine Marke der RAL gGmbH. Die Hex-Werte sind sRGB-Näherungen; farbverbindlich
 sind ausschließlich die offiziellen RAL-Farbkarten.
+
+## Bodentexturen (nicht im Repository, per `make textures` geladen)
+
+- Dateien: `assets/textures/<id>/` – Liste und Prüfsummen in `scripts/fetch-textures.sh` und
+  `scripts/textures.sha256`
+- Quelle: Poly Haven (<https://polyhaven.com>): `oak_wood_planks`, `laminate_floor_02`,
+  `laminate_floor_03`, `herringbone_parquet`, `plank_flooring_04`
+- Lizenz: CC0 1.0 (gemeinfrei) – Nutzung, Veränderung und Weitergabe auch kommerziell ohne
+  Namensnennung erlaubt. Die Nennung hier dient nur der Nachvollziehbarkeit.
+
+Fliesen-, Putz- und Teppichstrukturen erzeugt das Blender-Skript selbst (keine Drittinhalte).

@@ -45,6 +45,7 @@ async def run_blender(
     script: Path,
     workdir: Path,
     timeout_s: float,
+    texture_dir: Path | None = None,
 ) -> BlenderOutput:
     spec = workdir / "scene.json"
     fbx, glb = workdir / "model.fbx", workdir / "model.glb"
@@ -66,6 +67,8 @@ async def run_blender(
         "--glb",
         str(glb),
     ]
+    if texture_dir is not None:  # fehlender Ordner → Blender nutzt die Materialfarben
+        cmd += ["--textures", str(texture_dir)]
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,

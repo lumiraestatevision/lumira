@@ -53,6 +53,11 @@ def test_openings_are_found_between_wall_ends(cad_plan: CadPlanFactory) -> None:
     door = by_type[OpeningType.DOOR]
     assert door.width_mm == pytest.approx(900)
     assert door.swing is not None
+    # Tür schlägt ins Wohnen auf (links im Plan = kleinere x); Richtung hängt an der Wandachse
+    wall = plan.wall(door.wall_id)
+    direction = (wall.end.x - wall.start.x, wall.end.y - wall.start.y)
+    left_normal_x = -direction[1]
+    assert door.opens_to == ("left" if left_normal_x < 0 else "right")
     windows = sorted(o.width_mm for o in plan.openings if o.type is OpeningType.WINDOW)
     assert windows == [pytest.approx(1_000), pytest.approx(1_500)]
     # Öffnungen sitzen auf eigenen Wandstücken über die volle Lücke → Sturz/Brüstung im 3D-Modell

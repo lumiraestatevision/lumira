@@ -29,6 +29,7 @@ async def handle_blv_processed(event: Event, ctx: ServiceContext) -> Event:
             script=settings.blender_script,
             workdir=Path(tmp),
             timeout_s=settings.blender_timeout_s,
+            texture_dir=settings.texture_dir,
         )
         fbx_key = await ctx.storage.upload_file(
             artifact_key(event.project_id, STEP, "model.fbx"), result.fbx

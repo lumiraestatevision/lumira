@@ -23,6 +23,7 @@ import math
 import re
 from collections import defaultdict
 from dataclasses import dataclass
+from typing import Literal
 
 import cv2
 import numpy as np
@@ -315,7 +316,13 @@ def apertures(gaps: list[Gap]) -> list[Aperture]:
     return result
 
 
-def _arc_error(aperture: Aperture, curve: Stroke) -> tuple[float, DoorSwing] | None:
+@dataclass(slots=True)
+class DoorArc:
+    swing: DoorSwing  # Anschlag: Band am Anfang (LEFT) oder Ende (RIGHT) der Öffnung
+    opens_to: Literal["left", "right"]  # Aufschlagseite relativ zur Richtung Anfang → Ende
+
+
+def _arc_error(aperture: Aperture, curve: Stroke) -> tuple[float, DoorArc] | None:
     """Türaufschlag als Viertelkreis um eine Laibungsecke: beide Bogenenden haben den
     gleichen Abstand r zum Drehpunkt und liegen r·√2 auseinander. Das Türblatt kann schmaler
     sein als die Öffnung (feststehendes Seitenteil) → r zwischen 55 % und 110 % der Breite.
@@ -323,7 +330,11 @@ def _arc_error(aperture: Aperture, curve: Stroke) -> tuple[float, DoorSwing] | N
     width = aperture.width
     ends = _array([curve.points[0], curve.points[-1]])
     chord = float(np.linalg.norm(ends[1] - ends[0]))
-    best: tuple[float, DoorSwing] | None = None
+    axis = (aperture.end - aperture.start) / width
+    side: Literal["left", "right"] = (
+        "left" if _cross(axis, ends.mean(axis=0) - aperture.start) > 0 else "right"
+    )
+    best: tuple[float, DoorArc] | None = None
     for corner in aperture.corners:
         d1, d2 = (float(np.linalg.norm(end - corner)) for end in ends)
         radius = (d1 + d2) / 2
@@ -336,11 +347,11 @@ def _arc_error(aperture: Aperture, curve: Stroke) -> tuple[float, DoorSwing] | N
         near_start = np.linalg.norm(corner - aperture.start) < np.linalg.norm(corner - aperture.end)
         swing = DoorSwing.LEFT if near_start else DoorSwing.RIGHT
         if best is None or error < best[0]:
-            best = (error, swing)
+            best = (error, DoorArc(swing, side))
     return best
 
 
-def assign_door_arcs(found: list[Aperture], curves: list[Stroke]) -> dict[int, DoorSwing]:
+def assign_door_arcs(found: list[Aperture], curves: list[Stroke]) -> dict[int, DoorArc]:
     """Jeder Bogen gehört zu höchstens einer Öffnung – der am besten passenden."""
     candidates = []
     for i, aperture in enumerate(found):
@@ -351,13 +362,13 @@ def assign_door_arcs(found: list[Aperture], curves: list[Stroke]) -> dict[int, D
             match = _arc_error(aperture, curve)
             if match is not None:
                 candidates.append((match[0], i, j, match[1]))
-    swings: dict[int, DoorSwing] = {}
+    doors: dict[int, DoorArc] = {}
     used: set[int] = set()
-    for _, i, j, swing in sorted(candidates, key=lambda c: c[0]):
-        if i not in swings and j not in used:
-            swings[i] = swing
+    for _, i, j, door in sorted(candidates, key=lambda c: c[0]):
+        if i not in doors and j not in used:
+            doors[i] = door
             used.add(j)
-    return swings
+    return doors
 
 
 # ------------------------------------------------------------------ Raster: außen/innen, Räume
@@ -464,7 +475,7 @@ def recognize_cad(parsed: ParsedPlan) -> FloorPlan | None:
 
     walls = [p.wall for p in pieces]
     found = apertures(gaps)
-    swings = assign_door_arcs(found, parsed.curves)
+    doors = assign_door_arcs(found, parsed.curves)
     openings: list[Opening] = []
     for n, aperture in enumerate(found):
         # Mehrschalige Außenwand: nur die äußerste Schicht grenzt ans Freie.
@@ -478,8 +489,8 @@ def recognize_cad(parsed: ParsedPlan) -> FloorPlan | None:
             confidence=0.8,
         )
         walls.append(gap_wall)
-        swing = swings.get(n)
-        if swing is not None:
+        door = doors.get(n)
+        if door is not None:
             kind, sill, height = OpeningType.DOOR, 0.0, DOOR_HEIGHT_MM
         elif exterior:
             kind = OpeningType.WINDOW
@@ -497,8 +508,9 @@ def recognize_cad(parsed: ParsedPlan) -> FloorPlan | None:
                 width_mm=aperture.width,
                 height_mm=height,
                 sill_height_mm=sill,
-                swing=swing,
-                confidence=0.8 if swing is not None or exterior else 0.6,
+                swing=door.swing if door else None,
+                opens_to=door.opens_to if door else None,
+                confidence=0.8 if door is not None or exterior else 0.6,
             )
         )
 

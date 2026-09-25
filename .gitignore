@@ -32,6 +32,8 @@ frontend/next-env.d.ts
 # (nur Top-Level und Service-Ebene – lumira_shared/models/ ist Code und bleibt versioniert)
 /models/
 /services/*/models/
+# Fototexturen – make textures lädt sie (Prüfsummen in scripts/textures.sha256)
+/assets/textures/
 *.pt
 *.pth
 *.onnx

@@ -94,7 +94,16 @@ def test_scene_materials_follow_blv() -> None:
     assert scene["wall_finish"]["color"] == "#F1ECE1"
     [wall] = scene["walls"]
     assert wall["openings"] == [
-        {"id": "o1", "type": "door", "offset": 500.0, "width": 885.0, "height": 2010.0, "sill": 0.0}
+        {
+            "id": "o1",
+            "type": "door",
+            "offset": 500.0,
+            "width": 885.0,
+            "height": 2010.0,
+            "sill": 0.0,
+            "swing": None,
+            "opens_to": None,
+        }
     ]
     assert wall["footprint"] is None  # Quader aus Achse und Dicke
 
@@ -201,3 +210,57 @@ async def test_missing_blender_is_not_retryable(tmp_path: Path) -> None:
         await run_blender(
             {}, blender_bin="/gibt/es/nicht", script=SCRIPT, workdir=tmp_path, timeout_s=1
         )
+
+
+def test_standard_without_visible_floor_borrows_from_variant() -> None:
+    """Echte LV-Auswertung: Standard = Estrich (Untergrund), Parkett nur als Variante."""
+    plan = _plan()
+    floor = MaterialCategory.FLOORING
+    blv = BLVResult(
+        project_id=plan.project_id,
+        materials=[
+            Material(id="estrich", category=floor, name="Zementestrich", is_final_surface=False),
+            Material(id="parkett", category=floor, name="Eichenparkett", color_hex="#B8894F"),
+        ],
+        variants=[
+            EquipmentVariant(name="Standard", material_ids=["estrich"]),
+            EquipmentVariant(
+                name="Parkett statt Estrich", material_ids=["parkett", "estrich"], is_default=False
+            ),
+        ],
+    )
+
+    floors = {r["id"]: r["floor"] for r in build_scene(plan, blv)["rooms"]}
+
+    assert floors["flur"]["name"] == "Eichenparkett"
+    assert floors["flur"]["kind"] == "texture"
+    assert floors["flur"]["from_variant"] == "Parkett statt Estrich"
+
+
+def test_door_and_window_colors_are_the_inside_ones() -> None:
+    """Echte LV-Auswertung: Haustür anthrazit, Innentüren weiß, Fenster „weiß innen /
+    anthrazit außen“ – im Innenraum müssen Türen und Rahmen weiß sein."""
+    plan = _plan()
+    door, window = MaterialCategory.DOOR, MaterialCategory.WINDOW
+    blv = BLVResult(
+        project_id=plan.project_id,
+        materials=[
+            Material(
+                id="haustuer", category=door, name="Haustüre Alutürelement", color_hex="#383E42"
+            ),
+            Material(id="innen", category=door, name="Innentüren Röhrenspan", color_hex="#FFFFFF"),
+            Material(
+                id="fenster",
+                category=window,
+                name="Kunststofffenster",
+                color="Weiß innen / Anthrazit RAL 7016 außen",
+                color_hex="#383E42",
+            ),
+        ],
+        variants=[EquipmentVariant(name="Standard", material_ids=["haustuer", "innen", "fenster"])],
+    )
+
+    scene = build_scene(plan, blv)
+
+    assert scene["door_finish"]["color"] == "#FFFFFF"
+    assert scene["window_frame"]["color"] == "#F4F4F2"

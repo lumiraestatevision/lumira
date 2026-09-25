@@ -14,3 +14,5 @@ class GeneratorSettings(BaseServiceSettings):
     blender_script: Path = _DEFAULT_SCRIPT
     blender_timeout_s: int = 600
     equipment_variant: str | None = None  # None = Standardvariante aus dem BLV
+    # Fototexturen (make textures). Fehlt der Ordner, nutzt Blender die Materialfarben.
+    texture_dir: Path | None = None

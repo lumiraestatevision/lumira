@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections import Counter
 from enum import StrEnum
-from typing import Self
+from typing import Literal, Self
 from uuid import UUID
 
 from pydantic import Field, computed_field, model_validator
@@ -94,7 +94,14 @@ class Opening(LumiraModel):
     width_mm: float = Field(gt=0)
     height_mm: float = Field(gt=0)
     sill_height_mm: float = Field(default=0.0, ge=0, description="Brüstungshöhe, Türen: 0")
-    swing: DoorSwing | None = None
+    swing: DoorSwing | None = Field(
+        default=None, description="Anschlag: LEFT = Band am Wandanfang, RIGHT = am Wandende"
+    )
+    opens_to: Literal["left", "right"] | None = Field(
+        default=None,
+        description="Seite, in die das Türblatt aufschlägt – links/rechts der Wandrichtung "
+        "(Anfang → Ende)",
+    )
     confidence: Confidence = 1.0
 
 

@@ -15,7 +15,7 @@ funktioniert Hot Reload nicht.
 ```bash
 git clone <repo-url> ~/code/lumira && cd ~/code/lumira
 bash scripts/bootstrap-wsl.sh     # einmal pro Rechner: Docker, NVIDIA Toolkit, uv, Node, pnpm
-make setup                        # Python-Umgebung, pre-commit, Frontend, Docker-Images
+make setup                        # Python-Umgebung, pre-commit, Frontend, Texturen, Docker-Images
 make up                           # Stack starten, wartet bis alles gesund ist
 make test-integration             # Upload → komplette Eventkette → project.completed
 ```
@@ -71,6 +71,7 @@ make restart SERVICE=blv          # Service neu starten (z. B. nach .env-Änderu
 make check                        # lint + typecheck + Unit-Tests – dasselbe wie die CI
 make test-service SERVICE=parser  # Tests eines Pakets (SERVICE=shared für packages/shared)
 make fmt                          # formatieren + Auto-Fixes
+make textures                     # Bodentexturen laden (Poly Haven, CC0, ≈ 36 MB, nicht im Repo)
 make reset                        # ALLE lokalen Daten löschen (fragt nach)
 ```
 
@@ -158,6 +159,10 @@ dafür fehlt bisher die Zielplattform.
 
 ## Was lokal (noch) nicht echt ist
 
+- **3D-Modell**: Wände, Böden mit echten Materialien aus dem LV (Holz als Fototextur in
+  realer Größe, Fliesen im LV-Format, Putz), Türen (Zarge, geöffnetes Blatt), Fenster (Rahmen,
+  Glas). Noch nicht: Decken, Licht (Baking), Sanitärobjekte, Einrichtung, Treppen,
+  begehbarer Viewer / WebXR – in dieser Reihenfolge geplant (Weg „Browser + WebXR“).
 - **Unreal Engine**: nur Stub (schreibt ein Manifest). Echter Betrieb später auf einem GPU-Server.
 - **DWG**: wird mit klarer Fehlermeldung abgelehnt – bitte als DXF exportieren.
 - **PDF-Maßstab**: aus dem Schriftfeld („Maßstab 1:100“), sonst 1:100 angenommen; geprüft und

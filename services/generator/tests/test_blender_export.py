@@ -6,9 +6,11 @@ generator-Container bzw. im CI-Job "blender-export":
 
 from __future__ import annotations
 
+import json
 import shutil
 import struct
 import uuid
+import zlib
 from pathlib import Path
 
 import pytest
@@ -18,6 +20,7 @@ from lumira_generator.logic.blender_runner import run_blender
 from lumira_generator.logic.scene import build_scene
 from lumira_shared.models import (
     BLVResult,
+    DoorSwing,
     EquipmentVariant,
     FloorPlan,
     Material,
@@ -38,6 +41,33 @@ pytestmark = [
         shutil.which(settings.blender_bin) is None, reason="Blender nicht installiert"
     ),
 ]
+
+
+def _png(path: Path, rgb: tuple[int, int, int], size: int = 8) -> None:
+    """Winziges einfarbiges PNG ohne Bildbibliothek – als Ersatz für die Fototexturen."""
+    row = b"\x00" + bytes(rgb) * size
+    raw = zlib.compress(row * size)
+
+    def chunk(tag: bytes, data: bytes) -> bytes:
+        body = tag + data
+        return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body))
+
+    header = struct.pack(">IIBBBBB", size, size, 8, 2, 0, 0, 0)
+    path.write_bytes(
+        b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", raw) + chunk(b"IEND", b"")
+    )
+
+
+def _fake_textures(root: Path) -> Path:
+    folder = root / "textures" / "oak_wood_planks"
+    folder.mkdir(parents=True)
+    for kind, rgb in (
+        ("diff", (150, 100, 60)),
+        ("nor_gl", (128, 128, 255)),
+        ("rough", (120, 120, 120)),
+    ):
+        _png(folder / f"oak_wood_planks_{kind}_2k.png", rgb)
+    return root / "textures"
 
 
 def _rect(x0: float, y0: float, x1: float, y1: float) -> list[Point2D]:
@@ -105,6 +135,8 @@ def _scene() -> dict:
                 offset_mm=3_000,
                 width_mm=885,
                 height_mm=2_010,
+                swing=DoorSwing.LEFT,
+                opens_to="right",
             ),
             Opening(
                 id="gap_window",
@@ -135,12 +167,18 @@ def _scene() -> dict:
                 category=MaterialCategory.TILES,
                 name="Bodenfliesen",
                 color_hex="#BDBAB3",
+                format="60 x 60 cm",
                 room_types=[RoomType.BATHROOM],
             ),
         ],
         variants=[EquipmentVariant(name="Standard", material_ids=["eiche", "fliese"])],
     )
     return build_scene(plan, blv)
+
+
+def _gltf_json(glb: bytes) -> dict:
+    (chunk_length,) = struct.unpack("<I", glb[12:16])
+    return json.loads(glb[20 : 20 + chunk_length])
 
 
 async def test_real_blender_exports_fbx_and_gltf(tmp_path: Path) -> None:
@@ -150,14 +188,25 @@ async def test_real_blender_exports_fbx_and_gltf(tmp_path: Path) -> None:
         script=settings.blender_script,
         workdir=tmp_path,
         timeout_s=300,
+        texture_dir=_fake_textures(tmp_path),
     )
 
     assert result.stats["walls"] == 7
     assert result.stats["rooms"] == 2
     assert result.stats["openings"] == 3
     assert result.stats["blender"].startswith("4.")
+    assert "oak_wood_planks" in result.stats["textures"]
 
     glb = result.glb.read_bytes()
     magic, version, length = struct.unpack("<4sII", glb[:12])
     assert (magic, version, length) == (b"glTF", 2, len(glb))
+    gltf = _gltf_json(glb)
+    names = {node["name"] for node in gltf["nodes"]}
+    # Tür: Zarge + Blatt; Fenster: Rahmen + Glas (auch im CAD-Öffnungswandstück)
+    assert {"Tuerblatt_door", "Zarge_door_O", "Glas_win", "Glas_gap_window"} <= names
+    materials = {m["name"] for m in gltf["materials"]}
+    assert {"Eichenparkett", "Bodenfliesen", "Glas", "Wandkrone"} <= materials
+    assert len(gltf["images"]) >= 3  # Holz (Farbe, Normal, Rauheit) + erzeugte Fliese/Putz
+    glass = next(m for m in gltf["materials"] if m["name"] == "Glas")
+    assert glass["alphaMode"] == "BLEND"
     assert result.fbx.read_bytes().startswith(b"Kaydara FBX Binary")
