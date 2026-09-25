@@ -131,12 +131,24 @@ def _axis(points: np.ndarray) -> tuple[Point2D, Point2D, float]:
     )
 
 
+def _shape_key(points: np.ndarray) -> frozenset[tuple[int, int]]:
+    """Gleiche Fläche unabhängig von Startpunkt und Umlaufsinn (auf 5 mm gerundet)."""
+    return frozenset((round(x / 5), round(y / 5)) for x, y in points)
+
+
 def _pieces(areas: list[FilledArea], color: str) -> list[Piece]:
     pieces: list[Piece] = []
+    seen: set[frozenset[tuple[int, int]]] = set()
     for area in areas:
         if area.color != color:
             continue
         points = _array(area.polygon)
+        # CAD-Exporte zeichnen gemeinsame Bauteile oft doppelt (z. B. Gartenmauer je
+        # Haushälfte). Deckungsgleiche Körper stören Licht und Schatten im 3D-Modell.
+        key = _shape_key(points)
+        if key in seen:
+            continue
+        seen.add(key)
         start, end, thickness = _axis(points)
         if start.distance_to(end) < 20.0:
             continue

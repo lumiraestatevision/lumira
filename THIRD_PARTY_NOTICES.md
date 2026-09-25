@@ -46,3 +46,12 @@ sind ausschließlich die offiziellen RAL-Farbkarten.
   Namensnennung erlaubt. Die Nennung hier dient nur der Nachvollziehbarkeit.
 
 Fliesen-, Putz- und Teppichstrukturen erzeugt das Blender-Skript selbst (keine Drittinhalte).
+
+## 3D-Modelle (nicht im Repository, per `make assets` geladen)
+
+- Dateien: `assets/models/<id>/` – Liste und Prüfsummen in `scripts/fetch-models.py` und
+  `scripts/models.sha256`
+- Quelle: Poly Haven (<https://polyhaven.com>): `calathea_orbifolia_01` (Zimmerpflanze)
+- Lizenz: CC0 1.0 (gemeinfrei)
+
+Alle Möbel, Küchen und Sanitärobjekte erzeugt das Blender-Skript selbst (keine Drittinhalte).

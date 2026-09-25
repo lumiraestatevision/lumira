@@ -16,3 +16,5 @@ class GeneratorSettings(BaseServiceSettings):
     equipment_variant: str | None = None  # None = Standardvariante aus dem BLV
     # Fototexturen (make textures). Fehlt der Ordner, nutzt Blender die Materialfarben.
     texture_dir: Path | None = None
+    # 3D-Modelle (Pflanze …). Fehlt der Ordner, baut Blender einfache Ersatzformen.
+    model_dir: Path | None = None

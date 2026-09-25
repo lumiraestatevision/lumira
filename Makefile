@@ -34,13 +34,15 @@ setup: check-tools .env ## Einmalig: Python-Umgebung, pre-commit, Frontend, Dock
 	$(MAKE) --no-print-directory sync
 	uv run --no-sync pre-commit install
 	pnpm --dir frontend install --frozen-lockfile
-	$(MAKE) --no-print-directory textures
+	$(MAKE) --no-print-directory assets
 	$(MAKE) --no-print-directory build
 	@echo -e "\n✔ Setup fertig. Weiter mit: make up"
 
-.PHONY: textures
-textures: ## Bodentexturen laden (Poly Haven, CC0, ≈ 36 MB, nicht im Repo)
+.PHONY: assets textures
+assets: ## Texturen + Modelle laden (Poly Haven, CC0, ≈ 38 MB, nicht im Repo)
 	@bash scripts/fetch-textures.sh
+	@python3 scripts/fetch-models.py
+textures: assets
 
 .PHONY: sync
 sync: ## Python-Umgebung mit ALLEN Paketen aktualisieren (nach git pull)

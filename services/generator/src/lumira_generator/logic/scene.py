@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from lumira_generator.logic.furnish import furnish
 from lumira_generator.logic.surfaces import describe
 from lumira_shared.models import (
     BLVResult,
@@ -168,4 +169,6 @@ def build_scene(plan: FloorPlan, blv: BLVResult, *, variant: str | None = None) 
         "window_frame": _window_frame(blv, chosen),
         "walls": walls,
         "rooms": rooms,
+        # Einrichtung: feste Ausstattung (Küche, Sanitär) + lose Möbel (im Viewer ausblendbar)
+        "fixtures": furnish(plan, blv),
     }

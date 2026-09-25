@@ -45,6 +45,18 @@ def test_filled_walls_become_walls_with_exact_footprint(cad_plan: CadPlanFactory
     assert all(w.is_exterior for w in pieces if round(w.thickness_mm) == 300)
 
 
+def test_duplicate_wall_fills_become_one_wall(cad_plan: CadPlanFactory) -> None:
+    """Echter Plan: Gartenmauer je Haushälfte deckungsgleich doppelt gezeichnet."""
+    parsed = cad_plan()
+    walls = [a for a in parsed.filled_areas if a.color == "#808080"]
+    duplicate = walls[0].model_copy(update={"polygon": list(reversed(walls[0].polygon))})
+    parsed.filled_areas.append(duplicate)
+
+    plan = _recognize(parsed)
+
+    assert len([w for w in plan.walls if w.footprint]) == 8
+
+
 def test_openings_are_found_between_wall_ends(cad_plan: CadPlanFactory) -> None:
     plan = _recognize(cad_plan())
 

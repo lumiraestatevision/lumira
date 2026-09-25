@@ -371,7 +371,8 @@ services:
       PORT: "8005"
       BLENDER_BIN: /opt/blender/blender
       BLENDER_TIMEOUT_S: ${BLENDER_TIMEOUT_S:-600}
-      TEXTURE_DIR: /app/assets/textures  # make textures; fehlt der Ordner → Materialfarben
+      TEXTURE_DIR: /app/assets/textures  # make assets; fehlt der Ordner → Materialfarben
+      MODEL_DIR: /app/assets/models  # make assets; fehlt der Ordner → einfache Ersatzformen
     ports:
       - "127.0.0.1:8005:8005"
     volumes:
@@ -379,6 +380,7 @@ services:
       - ./services/generator/src:/app/services/generator/src:ro
       - ./services/generator/blender_scripts:/app/services/generator/blender_scripts:ro
       - ./assets/textures:/app/assets/textures:ro
+      - ./assets/models:/app/assets/models:ro
     deploy:
       resources:
         limits:
