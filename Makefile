@@ -62,6 +62,10 @@ build: .env ## Docker-Images bauen (nacheinander, aktives Profil)
 # ------------------------------------------------------------------ Stack
 .PHONY: up
 up: .env ## Stack starten (Profile aus .env) und warten, bis alles gesund ist
+	@# Neue Variablen aus .env.example landen nicht automatisch in einer bestehenden .env.
+	@missing="$$(for key in $$(grep -oE '^[A-Z_]+=' .env.example | tr -d '='); do \
+	  grep -q "^$$key=" .env || echo -n " $$key"; done)"; \
+	  [ -z "$$missing" ] || echo "⚠ In .env fehlen (Standardwerte greifen; bei Bedarf aus .env.example übernehmen):$$missing"
 	@# "up" stoppt Services inaktiver Profile nicht → z. B. die andere recognizer-Variante beenden
 	@inactive="$$(bash scripts/check-profiles.sh --inactive)" || exit 1; \
 	  $(COMPOSE) $(ALL_PROFILES) stop $$inactive >/dev/null 2>&1 || true; \
