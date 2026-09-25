@@ -8,7 +8,7 @@ SHELL := /usr/bin/env bash
 .DEFAULT_GOAL := help
 
 COMPOSE   := docker compose
-ALL_PROFILES := --profile cpu --profile gpu --profile vr
+ALL_PROFILES := --profile cpu --profile gpu --profile vr --profile llm
 PACKAGES  := packages/shared $(wildcard services/*)
 SERVICE   ?=
 TORCH     ?= cpu
@@ -63,8 +63,12 @@ build: .env ## Docker-Images bauen (nacheinander, aktives Profil)
 .PHONY: up
 up: .env ## Stack starten (Profile aus .env) und warten, bis alles gesund ist
 	@# "up" stoppt Services inaktiver Profile nicht → z. B. die andere recognizer-Variante beenden
-	@inactive="$$(bash scripts/check-profiles.sh --inactive)"; \
-	  $(COMPOSE) $(ALL_PROFILES) stop $$inactive >/dev/null 2>&1 || true
+	@inactive="$$(bash scripts/check-profiles.sh --inactive)" || exit 1; \
+	  $(COMPOSE) $(ALL_PROFILES) stop $$inactive >/dev/null 2>&1 || true; \
+	  if ! grep -qw ollama <<<"$$inactive"; then \
+	    echo "→ lokales LLM: Modell laden (beim ersten Mal einige GB, mit Fortschrittsanzeige)"; \
+	    $(COMPOSE) run --rm ollama-pull || exit 1; \
+	  fi
 	$(COMPOSE) up -d --wait --wait-timeout 600 --remove-orphans
 	@$(MAKE) --no-print-directory ps
 	@echo -e "\n  Web-UI      http://localhost:3000\n  API-Doku    http://localhost:8000/docs\n  MinIO       http://localhost:9001"

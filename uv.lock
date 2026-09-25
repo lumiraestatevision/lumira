@@ -856,6 +856,7 @@ source = { editable = "services/blv" }
 dependencies = [
     { name = "anthropic" },
     { name = "google-genai" },
+    { name = "httpx" },
     { name = "lumira-shared" },
     { name = "pypdfium2" },
 ]
@@ -877,6 +878,7 @@ dev = [
 requires-dist = [
     { name = "anthropic", specifier = ">=0.69" },
     { name = "google-genai", specifier = ">=2.25" },
+    { name = "httpx", specifier = ">=0.28" },
     { name = "lumira-shared", editable = "packages/shared" },
     { name = "pypdfium2", specifier = ">=4.30" },
 ]

@@ -3,11 +3,12 @@
 #   make up                           → Infrastruktur + Services gemäß COMPOSE_PROFILES aus .env
 #   COMPOSE_PROFILES=gpu,vr make up   → recognizer auf der GPU + Unreal-Stub
 #
-# Profile (genau EINES von cpu/gpu wählen, vr optional):
+# Profile (genau EINES von cpu/gpu wählen, vr und llm optional):
 #   cpu  recognizer mit CPU-PyTorch (funktioniert überall)
 #   gpu  recognizer mit CUDA-PyTorch (NVIDIA-GPU + NVIDIA Container Toolkit nötig)
 #   vr   Unreal-Stub; ohne ihn schließt das backend Projekte nach model.generated ab
 #        (PIPELINE_VR_ENABLED=false in .env)
+#   llm  lokales LLM (Ollama) für blv mit BLV_PROVIDER=ollama (NVIDIA-GPU nötig)
 #
 # Alle Ports sind nur an 127.0.0.1 gebunden – nicht aus dem LAN erreichbar.
 
@@ -266,8 +267,59 @@ services:
       - *shared-src
       - ./services/classifier/src:/app/services/classifier/src:ro
 
+  # Lokales LLM für blv (BLV_PROVIDER=ollama) – kostenlos, Daten bleiben auf dem Rechner.
+  # Braucht eine NVIDIA-GPU (auf der CPU dauert ein LV viele Minuten).
+  ollama:
+    image: ollama/ollama:0.34.4  # MIT-Lizenz
+    profiles: [llm]
+    restart: unless-stopped
+    environment:
+      OLLAMA_FLASH_ATTENTION: "1"
+      OLLAMA_KV_CACHE_TYPE: q8_0  # halbiert den Grafikspeicher für das Kontextfenster
+      OLLAMA_NUM_PARALLEL: "1"
+      OLLAMA_MAX_LOADED_MODELS: "1"
+      # Beim ersten Laden übersetzt der CUDA-Treiber die GPU-Kernel für die eigene Karte
+      # (dauert Minuten). Den Cache im Volume behalten, sonst passiert das nach jedem Neustart.
+      CUDA_CACHE_PATH: /root/.ollama/cuda-cache
+      CUDA_CACHE_MAXSIZE: "4294967296"
+      OLLAMA_LOAD_TIMEOUT: 30m
+    ports:
+      - "127.0.0.1:11434:11434"
+    volumes:
+      - ollama-models:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  # Lädt das Modell einmalig herunter (danach nur ein kurzer Abgleich beim Start).
+  ollama-pull:
+    image: ollama/ollama:0.34.4
+    profiles: [llm]
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    command: ["pull", "${BLV_OLLAMA_MODEL:-qwen3.5:4b}"]
+    depends_on:
+      ollama:
+        condition: service_healthy
+    restart: "no"
+
   blv:
     <<: *python-service
+    depends_on:
+      <<: *python-depends
+      ollama-pull:  # nur wenn Profil "llm" aktiv ist
+        condition: service_completed_successfully
+        required: false
     build:
       context: .
       dockerfile: services/blv/Dockerfile
@@ -289,6 +341,10 @@ services:
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       BLV_GEMINI_MODEL: ${BLV_GEMINI_MODEL:-gemini-3.8-flash}
       BLV_GEMINI_FALLBACK_MODELS: ${BLV_GEMINI_FALLBACK_MODELS:-gemini-3.5-flash,gemini-3.5-flash-lite}
+      OLLAMA_URL: http://ollama:11434
+      BLV_OLLAMA_MODEL: ${BLV_OLLAMA_MODEL:-qwen3.5:4b}
+      BLV_OLLAMA_NUM_CTX: ${BLV_OLLAMA_NUM_CTX:-32768}
+      BLV_OLLAMA_THINK: ${BLV_OLLAMA_THINK:-false}
     ports:
       - "127.0.0.1:8004:8004"
     volumes:
@@ -377,3 +433,4 @@ volumes:
   redis-data:
   minio-data:
   ml-models:  # EasyOCR-/Torch-Gewichte des recognizers (bleiben über Rebuilds erhalten)
+  ollama-models:  # Gewichte des lokalen LLMs (Profil llm)

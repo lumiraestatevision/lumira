@@ -13,7 +13,7 @@ from pypdf import PdfReader, PdfWriter
 
 from lumira_blv.config import BLVSettings
 from lumira_blv.handler import check_pdf, handle_rooms_classified
-from lumira_blv.logic import claude, gemini
+from lumira_blv.logic import claude, gemini, ollama
 from lumira_blv.logic.extraction import (
     BLVExtraction,
     ExtractedMaterial,
@@ -103,6 +103,13 @@ def test_provider_selects_key_and_model() -> None:
     # Key nur für den anderen Anbieter → Stub
     assert _settings(blv_provider="gemini", anthropic_api_key="sk-a").use_llm is False
     assert _settings(blv_provider="gemini", gemini_api_key="  ").use_llm is False
+
+
+def test_ollama_needs_no_key() -> None:
+    local = _settings(blv_provider="ollama", anthropic_api_key="sk-a")
+    assert (local.api_key, local.model, local.use_llm) == (None, "qwen3.5:4b", True)
+    assert _settings(blv_provider="ollama", blv_mode="llm").use_llm is True
+    assert _settings(blv_provider="ollama", blv_mode="stub").use_llm is False
 
 
 # ------------------------------------------------------------------ Extraktion → BLVResult
@@ -206,6 +213,7 @@ async def test_without_key_blv_is_not_sent_to_llm(
 
     monkeypatch.setattr(claude, "extract_with_claude", must_not_be_called)
     monkeypatch.setattr(gemini, "extract_with_gemini", must_not_be_called)
+    monkeypatch.setattr(ollama, "extract_with_ollama", must_not_be_called)
     result_event = await handle_rooms_classified(_classified("projects/x/upload/blv.pdf"), stub_ctx)
     assert result_event.data["extracted_by"] == "stub"
 
@@ -230,8 +238,21 @@ async def test_without_key_blv_is_not_sent_to_llm(
             },
             "gemini-3.5-flash",  # z. B. nach Ausweichen wegen Überlastung
         ),
+        (
+            {"blv_provider": "ollama", "ollama_url": "http://gpu-box:11434"},
+            ollama,
+            "extract_with_ollama",
+            {
+                "base_url": "http://gpu-box:11434",
+                "model": "qwen3.5:4b",
+                "num_ctx": 32_768,
+                "think": False,
+                "timeout_s": 1800,
+            },
+            "ollama/qwen3.5:4b",
+        ),
     ],
-    ids=["anthropic", "gemini"],
+    ids=["anthropic", "gemini", "ollama"],
 )
 async def test_llm_path(
     storage: S3Storage,

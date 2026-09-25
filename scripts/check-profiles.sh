@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Prüft COMPOSE_PROFILES (+ PIPELINE_VR_ENABLED) und gibt den recognizer-Service des aktiven
+# Prüft COMPOSE_PROFILES (+ PIPELINE_VR_ENABLED, BLV_PROVIDER) und gibt den recognizer-Service des aktiven
 # Profils aus: "recognizer" (cpu) oder "recognizer-gpu" (gpu). Genutzt vom Makefile.
 #   --inactive  gibt stattdessen die Services INAKTIVER Profile aus (zum Stoppen vor "up")
 set -euo pipefail
@@ -11,6 +11,7 @@ from_env_file() {
 }
 profiles="${COMPOSE_PROFILES:-$(from_env_file COMPOSE_PROFILES)}"
 vr_enabled="${PIPELINE_VR_ENABLED:-$(from_env_file PIPELINE_VR_ENABLED)}"
+blv_provider="${BLV_PROVIDER:-$(from_env_file BLV_PROVIDER)}"
 
 IFS=',' read -ra list <<<"$profiles"
 has() {
@@ -31,6 +32,14 @@ fi
 if has vr && [ "${vr_enabled,,}" != "true" ]; then
   echo "⚠ Profil 'vr' aktiv, aber PIPELINE_VR_ENABLED=false – Projekte enden schon nach model.generated." >&2
 fi
+if [ "${blv_provider,,}" = "ollama" ] && ! has llm; then
+  echo "✘ BLV_PROVIDER=ollama, aber Profil 'llm' fehlt – blv erreicht kein lokales Modell." >&2
+  echo "  COMPOSE_PROFILES um ',llm' ergänzen (z. B. cpu,llm) oder einen anderen BLV_PROVIDER wählen." >&2
+  exit 1
+fi
+if has llm && [ "${blv_provider,,}" != "ollama" ]; then
+  echo "⚠ Profil 'llm' aktiv, aber BLV_PROVIDER=${blv_provider:-anthropic} – Ollama läuft ungenutzt." >&2
+fi
 
 if has gpu; then
   active=recognizer-gpu inactive=recognizer
@@ -43,6 +52,7 @@ fi
 
 if [ "$mode" = "--inactive" ]; then
   has vr || inactive="$inactive unreal"
+  has llm || inactive="$inactive ollama"
   echo "$inactive"
 else
   echo "$active"

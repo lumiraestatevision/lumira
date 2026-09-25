@@ -56,6 +56,7 @@ Danach: **Web-UI** <http://localhost:3000> · **API-Doku** <http://localhost:800
 | recognizer | 8002 | Wände, Öffnungen, Räume (GPU optional, CPU-Fallback) |
 | classifier | 8003 | Raumtypen aus deutscher Beschriftung, Geometrie-Fallback |
 | blv | 8004 | Leistungsverzeichnis per LLM → Materialien, Varianten |
+| ollama | 11434 | lokales LLM für blv – optional (Profil `llm`) |
 | generator | 8005 | 3D-Modell mit Blender 4.5 LTS (headless) → FBX, glTF |
 | unreal | 8006 | VR-Export – **lokal nur Stub** |
 | frontend | 3000 | Web-UI (Next.js) mit 3D-Vorschau |
@@ -85,10 +86,17 @@ dass `.env` oder private Schlüssel committet werden – mit denselben Versionen
 
 | Variable | Bedeutung |
 |---|---|
-| `COMPOSE_PROFILES` | `cpu` **oder** `gpu`, optional `,vr` – z. B. `gpu,vr` |
+| `COMPOSE_PROFILES` | `cpu` **oder** `gpu`, optional `,vr` und `,llm` – z. B. `cpu,llm` |
 | `PIPELINE_VR_ENABLED` | `true` nur zusammen mit Profil `vr` (sonst wird kein Projekt fertig – `make up` prüft das) |
-| `BLV_PROVIDER` | `anthropic` (Claude, für den Betrieb) oder `gemini` (Gratistarif, nur lokal) |
-| `ANTHROPIC_API_KEY` / `GEMINI_API_KEY` | Ohne Key für den gewählten Anbieter: Standardausstattung (Stub) |
+| `BLV_PROVIDER` | `anthropic` (Claude, für den Betrieb), `gemini` (nur lokal) oder `ollama` (lokales Modell, kostenlos, nur Entwicklung – braucht Profil `llm`) |
+| `ANTHROPIC_API_KEY` / `GEMINI_API_KEY` | Ohne Key für den gewählten Anbieter: Standardausstattung (Stub). `ollama` braucht keinen Key |
+
+**Lokales Modell (`BLV_PROVIDER=ollama`, Profil `llm`):** kostenlos, das LV verlässt den Rechner
+nicht. Braucht eine NVIDIA-GPU (getestet: RTX 3060 Ti, 8 GB, Modell `qwen3.5:4b`). Beim ersten
+`make up` wird das Modell geladen (≈ 3,4 GB), beim ersten Auswerten übersetzt der Treiber einmalig
+die GPU-Kernel (≈ 1–2 min). Ein LV mit 15–20 Seiten dauert einige Minuten. Kleine lokale Modelle
+lesen nur den Text (keine Scans) und sind bei Varianten und Innen/Außen unzuverlässiger als
+Claude – für Kunden-LVs `anthropic` verwenden.
 
 **Gemini-Gratistarif:** nur für lokale Entwicklung. Google darf Ein- und Ausgaben lesen
 (keine vertraulichen oder personenbezogenen Daten!), und laut Nutzungsbedingungen dürfen
