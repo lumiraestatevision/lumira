@@ -181,8 +181,19 @@ def _scene() -> dict:
                 format="60 x 60 cm",
                 room_types=[RoomType.BATHROOM],
             ),
+            Material(
+                id="wohnfliese",
+                category=MaterialCategory.TILES,
+                name="Feinsteinzeug Wohnen",
+                color_hex="#8C8780",
+                format="60 x 60 cm",
+                room_types=[RoomType.LIVING],
+            ),
         ],
-        variants=[EquipmentVariant(name="Standard", material_ids=["eiche", "fliese"])],
+        variants=[
+            EquipmentVariant(name="Standard", material_ids=["eiche", "fliese"]),
+            EquipmentVariant(name="Fliesen im Wohnen", material_ids=["fliese", "wohnfliese"]),
+        ],
     )
     return build_scene(plan, blv)
 
@@ -253,6 +264,24 @@ async def test_real_blender_exports_fbx_and_gltf(tmp_path: Path) -> None:
     assert "occlusionTexture" not in by_name["Tür"]
     assert "occlusionTexture" not in by_name["Glas"]
     floor = next(n for n in gltf["nodes"] if n["name"].startswith("Floor_wohnen"))
-    attributes = gltf["meshes"][floor["mesh"]]["primitives"][0]["attributes"]
-    assert {"TEXCOORD_0", "TEXCOORD_1"} <= set(attributes)
+    primitive = gltf["meshes"][floor["mesh"]]["primitives"][0]
+    assert {"TEXCOORD_0", "TEXCOORD_1"} <= set(primitive["attributes"])
+
+    # Ausstattungsvarianten: umschaltbarer Bodenbelag, Variantenmaterial mit Lightmap
+    variants = [v["name"] for v in gltf["extensions"]["KHR_materials_variants"]["variants"]]
+    assert sorted(variants) == ["Fliesen im Wohnen", "Standard"]
+    mappings = primitive["extensions"]["KHR_materials_variants"]["mappings"]
+    by_variant = {
+        variants[i]: gltf["materials"][m["material"]] for m in mappings for i in m["variants"]
+    }
+    assert by_variant["Standard"]["name"] == "Eichenparkett"
+    tiled = by_variant["Fliesen im Wohnen"]
+    assert tiled["name"] == "Feinsteinzeug Wohnen"
+    assert tiled["occlusionTexture"]["texCoord"] == 1
+    # Texturmaßstab im Material (UVs in Metern): 60-cm-Fliese → 1/0,6 je Meter
+    transform = tiled["pbrMetallicRoughness"]["baseColorTexture"]["extensions"][
+        "KHR_texture_transform"
+    ]
+    assert transform["scale"][0] == pytest.approx(1 / 0.6, rel=0.01)
+    assert result.stats["variants"] == ["Standard", "Fliesen im Wohnen"]
     assert result.fbx.read_bytes().startswith(b"Kaydara FBX Binary")

@@ -23,38 +23,43 @@ const DECODED = `
     vec3 lightMapIrradiance = lightMapTexel.rgb * ( lumiraKey / max( 1.0 - lumiraLum, 0.02 ) )
       * lightMapIntensity;`;
 
-/** Materialien mit Lightmap auf eingebranntes Licht umstellen. Liefert die Anzahl. */
-export function applyLightmaps(root: THREE.Object3D, info: LightmapInfo): number {
+/** Ein Material auf eingebranntes Licht umstellen (Occlusion-Textur → Lightmap). */
+export function bakeMaterial(material: THREE.Material, info: LightmapInfo): boolean {
+  const standard = material as THREE.MeshStandardMaterial;
+  if (!standard.isMeshStandardMaterial || !standard.aoMap || standard.userData.baked) return false;
   const chunk = THREE.ShaderChunk.lights_fragment_maps;
   if (!chunk.includes(DECODE)) {
     console.warn("three.js-Shader geändert – Lightmap bleibt Umgebungsverdeckung");
-    return 0;
+    return false;
   }
   const patched = chunk.replace(DECODE, DECODED);
-  const done = new Set<THREE.Material>();
+  standard.lightMap = standard.aoMap;
+  // three.js teilt die Lightmap-Irradianz durch π (Lambert) – das Einbrennen nicht
+  standard.lightMapIntensity = Math.PI;
+  standard.aoMap = null;
+  standard.envMapIntensity = 0; // Licht steckt komplett in der Lightmap
+  standard.userData.baked = true;
+  standard.onBeforeCompile = (shader) => {
+    shader.uniforms.lumiraKey = { value: info.key };
+    shader.fragmentShader = `uniform float lumiraKey;\n${shader.fragmentShader}`.replace(
+      "#include <lights_fragment_maps>",
+      patched,
+    );
+  };
+  standard.customProgramCacheKey = () => "lumira-lightmap";
+  standard.needsUpdate = true;
+  return true;
+}
+
+/** Alle Materialien mit Lightmap auf eingebranntes Licht umstellen. Liefert die Anzahl. */
+export function applyLightmaps(root: THREE.Object3D, info: LightmapInfo): number {
+  let count = 0;
   root.traverse((object) => {
     const mesh = object as THREE.Mesh;
     if (!mesh.isMesh) return;
     for (const material of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
-      const standard = material as THREE.MeshStandardMaterial;
-      if (done.has(material) || !standard.isMeshStandardMaterial || !standard.aoMap) continue;
-      done.add(material);
-      standard.lightMap = standard.aoMap;
-      // three.js teilt die Lightmap-Irradianz durch π (Lambert) – das Einbrennen nicht
-      standard.lightMapIntensity = Math.PI;
-      standard.aoMap = null;
-      standard.envMapIntensity = 0; // Licht steckt komplett in der Lightmap
-      standard.userData.baked = true;
-      standard.onBeforeCompile = (shader) => {
-        shader.uniforms.lumiraKey = { value: info.key };
-        shader.fragmentShader = `uniform float lumiraKey;\n${shader.fragmentShader}`.replace(
-          "#include <lights_fragment_maps>",
-          patched,
-        );
-      };
-      standard.customProgramCacheKey = () => "lumira-lightmap";
-      standard.needsUpdate = true;
+      if (bakeMaterial(material, info)) count++;
     }
   });
-  return done.size;
+  return count;
 }

@@ -107,8 +107,10 @@ def test_scene_materials_follow_blv() -> None:
             "opens_to": None,
             # Schwelle mit dem Belag des angrenzenden Raums (links der Wand: „bad“)
             "threshold": next(r["floor"] for r in scene["rooms"] if r["id"] == "bad"),
+            "threshold_room": "bad",
         }
     ]
+    assert scene["variants"] == []  # nur eine Variante im LV
     assert wall["footprint"] is None  # Quader aus Achse und Dicke
 
 
@@ -120,6 +122,49 @@ def test_scene_passes_exact_wall_footprint() -> None:
     [wall] = build_scene(plan, _blv(plan.project_id))["walls"]
 
     assert wall["footprint"] == [[float(x), float(y)] for x, y in l_shape]
+
+
+def test_variants_switch_floors_and_skip_variants_without_effect() -> None:
+    """LV mit Varianten → umschaltbare Beläge; Varianten ohne Wirkung (Balkon ohne Balkon,
+    gleiche Beläge) erscheinen nicht."""
+    plan = _plan()
+    plan.rooms = [r for r in plan.rooms if r.id == "flur"]
+    plan.stairs = [_stair()]
+    materials = [
+        Material(id="estrich", category=MaterialCategory.FLOORING, name="Estrich"),
+        Material(
+            id="parkett",
+            category=MaterialCategory.FLOORING,
+            name="Parkett Eiche",
+            room_types=[RoomType.HALLWAY],
+        ),
+        Material(
+            id="balkon",
+            category=MaterialCategory.FLOORING,
+            name="Betonwerkstein",
+            room_types=[RoomType.BALCONY],
+        ),
+    ]
+    blv = BLVResult(
+        project_id=plan.project_id,
+        materials=materials,
+        variants=[
+            EquipmentVariant(name="Standard", material_ids=["estrich"]),
+            EquipmentVariant(name="Parkett statt Estrich", material_ids=["parkett"]),
+            EquipmentVariant(name="Balkon", material_ids=["estrich", "balkon"]),
+        ],
+    )
+
+    scene = build_scene(plan, blv)
+
+    names = [v["name"] for v in scene["variants"]]
+    assert names == ["Standard", "Parkett statt Estrich"]
+    standard, parkett = scene["variants"]
+    assert standard["floors"]["flur"]["name"] == "Estrich"
+    assert parkett["floors"]["flur"]["name"] == "Parkett Eiche"
+    assert parkett["floors"]["flur"]["kind"] == "texture"
+    # Treppe am Antritt im Flur: Stufenbelag folgt dem Boden der Variante
+    assert parkett["treads"]["treppe"]["name"] == "Parkett Eiche"
 
 
 DOOR_SIDES: list[tuple[Literal["left", "right"], float]] = [("left", 500), ("right", 2_000)]
@@ -384,11 +429,36 @@ def test_standard_without_visible_floor_borrows_from_variant() -> None:
         ],
     )
 
-    floors = {r["id"]: r["floor"] for r in build_scene(plan, blv)["rooms"]}
+    scene = build_scene(plan, blv)
+    floors = {r["id"]: r["floor"] for r in scene["rooms"]}
 
     assert floors["flur"]["name"] == "Eichenparkett"
     assert floors["flur"]["kind"] == "texture"
     assert floors["flur"]["from_variant"] == "Parkett statt Estrich"
+    # Die Parkett-Variante sieht genauso aus wie die Grundansicht → kein Umschalter
+    assert scene["variants"] == []
+
+    # Einzeloption, die sichtbar etwas ändert: Fliesen im Flur statt Parkett
+    blv.materials.append(
+        Material(
+            id="fliese",
+            category=MaterialCategory.TILES,
+            name="Feinsteinzeug Flur",
+            room_types=[RoomType.HALLWAY],
+        )
+    )
+    blv.variants.append(
+        EquipmentVariant(
+            name="Feinsteinzeug Treppenhaus", material_ids=["fliese"], is_default=False
+        )
+    )
+
+    variants = build_scene(plan, blv)["variants"]
+
+    assert [v["name"] for v in variants] == ["Musterausstattung", "Feinsteinzeug Treppenhaus"]
+    assert variants[0]["floors"]["flur"]["name"] == "Eichenparkett"
+    assert variants[1]["floors"]["flur"]["name"] == "Feinsteinzeug Flur"
+    assert variants[1]["floors"]["bad"] == variants[0]["floors"]["bad"]  # übrige Räume gleich
 
 
 def test_door_and_window_colors_are_the_inside_ones() -> None:

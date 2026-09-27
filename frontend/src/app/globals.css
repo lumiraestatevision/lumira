@@ -239,6 +239,21 @@ button.danger:disabled {
   top: 12px;
   right: 12px;
   z-index: 1;
+  display: flex;
+  gap: 8px;
+}
+
+/* Ausstattungsvariante (3D-Vorschau und Rundgang) */
+select.variant {
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 5px 10px;
+  color: #f4f4f2;
+  background: rgba(20, 22, 26, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 8px;
+  max-width: 260px;
 }
 
 button.toggle {

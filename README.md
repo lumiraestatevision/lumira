@@ -166,7 +166,9 @@ dafür fehlt bisher die Zielplattform.
   Deckenöffnung. Licht ist eingebrannt (Tageslicht durch die Fenster + Deckenleuchten mit
   indirektem Licht, Lightmap für die Raumhülle): auf der CPU 64 Samples (~4 min), mit
   NVIDIA-GPU 512 Samples (~1 min, `COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml`
-  in `.env`). Noch nicht: Geländer, Obergeschoss, Wechsel der Ausstattungsvarianten.
+  in `.env`). Ausstattungsvarianten aus dem LV (z. B. „Parkett statt Estrich“) sind in der
+  3D-Vorschau und im Rundgang umschaltbar (glTF `KHR_materials_variants`; nur Varianten, die im
+  Grundriss etwas ändern). Noch nicht: Geländer, Obergeschoss.
 - **Rundgang** („Rundgang starten“ beim Projekt): frei durchs Modell gehen – PC mit Maus und
   W/A/S/D, Handy per Wischen, VR-Brille per WebXR (Teleport mit dem Abzug, linker Stick gehen,
   rechter Stick drehen). Kollision mit Wänden und Möbeln, Treppen begehbar, eingebranntes Licht.

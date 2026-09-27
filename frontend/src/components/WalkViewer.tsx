@@ -7,6 +7,7 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
 import { applyLightmaps, lightmapInfo } from "@/lib/walk/lightmap";
 import { EYE_HEIGHT, NavGrid, type Pose, kindOf } from "@/lib/walk/navgrid";
+import { Variants } from "@/lib/walk/variants";
 
 // Begehbares Modell: im Browser frei durch das Haus gehen – am PC (Maus + WASD), am Handy
 // (links ziehen = gehen, rechts ziehen = umsehen) und mit VR-Brille (WebXR: Teleport per
@@ -37,6 +38,7 @@ interface Runtime {
   turnCooldown: number;
   aiming: Map<THREE.Object3D, Pose | null>;
   vrSync: boolean; // erster VR-Frame: Kopf auf die Position setzen, nicht dorthin gehen
+  variants: Variants | null;
 }
 
 type TouchRole = { role: "move" | "look"; x: number; y: number; startX: number; startY: number };
@@ -52,6 +54,8 @@ export default function WalkViewer({ src, onClose }: { src: string; onClose: () 
   const [hasFurniture, setHasFurniture] = useState(false);
   const [vrSupported, setVrSupported] = useState(false);
   const [inVr, setInVr] = useState(false);
+  const [variantNames, setVariantNames] = useState<string[]>([]);
+  const [variant, setVariant] = useState("");
 
   useEffect(() => {
     const host = container.current;
@@ -106,6 +110,7 @@ export default function WalkViewer({ src, onClose }: { src: string; onClose: () 
       turnCooldown: 0,
       aiming: new Map(),
       vrSync: false,
+      variants: null,
     };
     runtime.current = rt;
     if (process.env.NODE_ENV === "development") {
@@ -124,6 +129,9 @@ export default function WalkViewer({ src, onClose }: { src: string; onClose: () 
           if ((object as THREE.Mesh).isMesh && kindOf(object) === "loose") rt.furniture.push(object);
         });
         scene.add(root);
+        rt.variants = new Variants(gltf, info);
+        setVariantNames(rt.variants.names);
+        setVariant(rt.variants.names[0] ?? "");
         const grid = NavGrid.fromScene(root);
         const start = grid.spawn();
         rt.grid = grid;
@@ -287,6 +295,11 @@ export default function WalkViewer({ src, onClose }: { src: string; onClose: () 
     setFurniture(next);
   }, [furniture]);
 
+  const chooseVariant = useCallback((name: string) => {
+    setVariant(name);
+    void runtime.current?.variants?.select(name);
+  }, []);
+
   const enterVr = useCallback(async () => {
     const rt = runtime.current;
     if (!rt || !navigator.xr) return;
@@ -317,6 +330,20 @@ export default function WalkViewer({ src, onClose }: { src: string; onClose: () 
         </div>
       )}
       <div className="walk-controls">
+        {variantNames.length > 1 && (
+          <select
+            className="variant"
+            aria-label="Ausstattungsvariante"
+            value={variant}
+            onChange={(event) => chooseVariant(event.target.value)}
+          >
+            {variantNames.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+        )}
         {hasFurniture && (
           <button type="button" className="toggle" aria-pressed={furniture} onClick={toggleFurniture}>
             {furniture ? "Möbel ausblenden" : "Möbel einblenden"}

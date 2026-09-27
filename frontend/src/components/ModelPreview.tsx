@@ -17,6 +17,9 @@ interface ViewerMaterial {
 interface ViewerElement extends HTMLElement {
   model?: { materials: ViewerMaterial[] };
   exposure: number;
+  // Ausstattungsvarianten aus dem LV (glTF KHR_materials_variants)
+  availableVariants: string[];
+  variantName: string | null;
 }
 
 // Eingebranntes Licht (Lightmap als Occlusion-Textur) dunkelt die Umgebungsbeleuchtung ab –
@@ -52,6 +55,8 @@ export function ModelPreview({ src }: { src: string }) {
   const [ready, setReady] = useState(false);
   const [furniture, setFurniture] = useState(true);
   const [hasFurniture, setHasFurniture] = useState(false);
+  const [variants, setVariants] = useState<string[]>([]);
+  const [variant, setVariant] = useState("");
   const viewer = useRef<ViewerElement | null>(null);
   const original = useRef(new Map<ViewerMaterial, [string, number[]]>());
   const furnitureOn = useRef(true); // aktueller Stand für den load-Listener
@@ -83,6 +88,10 @@ export function ModelPreview({ src }: { src: string }) {
         apply(furnitureOn.current);
         const baked = (element.model?.materials ?? []).some((m) => m.occlusionTexture?.texture);
         element.exposure = baked ? EXPOSURE_BAKED : EXPOSURE;
+        // Die Datei enthält die Standardvariante als Grundmaterial – sie steht vorn in der Liste
+        const names = element.availableVariants ?? [];
+        setVariants(names);
+        setVariant(element.variantName ?? names[0] ?? "");
       });
     },
     [apply],
@@ -95,14 +104,35 @@ export function ModelPreview({ src }: { src: string }) {
     apply(next);
   }
 
+  function chooseVariant(name: string) {
+    setVariant(name);
+    if (viewer.current) viewer.current.variantName = name;
+  }
+
   if (!ready) return <p className="muted">3D-Vorschau wird geladen …</p>;
   return (
     <div className="viewer">
-      {hasFurniture && (
+      {(hasFurniture || variants.length > 1) && (
         <div className="viewer-controls">
-          <button type="button" className="toggle" aria-pressed={furniture} onClick={toggle}>
-            {furniture ? "Möbel ausblenden" : "Möbel einblenden"}
-          </button>
+          {variants.length > 1 && (
+            <select
+              className="variant"
+              aria-label="Ausstattungsvariante"
+              value={variant}
+              onChange={(event) => chooseVariant(event.target.value)}
+            >
+              {variants.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          )}
+          {hasFurniture && (
+            <button type="button" className="toggle" aria-pressed={furniture} onClick={toggle}>
+              {furniture ? "Möbel ausblenden" : "Möbel einblenden"}
+            </button>
+          )}
         </div>
       )}
       {createElement("model-viewer", {

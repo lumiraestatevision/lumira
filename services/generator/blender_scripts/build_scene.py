@@ -47,7 +47,8 @@ DOOR_FRAME_MM = 30.0
 DOOR_LEAF_MAX = 1.01  # m – breitere Öffnungen bekommen ein festes Seitenteil
 WINDOW_PROFILE_MM = 70.0
 WINDOW_DEPTH_MM = 80.0
-BASE_UV = "UVMap"  # Materialtexturen (glTF TEXCOORD_0)
+BASE_UV = "UVMap"  # Materialtexturen (glTF TEXCOORD_0), in Metern – Maßstab im Material
+UV_METERS = (1.0, 1.0)
 LIGHTMAP_UV = "Lightmap"  # eingebranntes Licht (glTF TEXCOORD_1)
 
 _materials = {}
@@ -214,19 +215,29 @@ def _uv_node(mat, uv_map):
     return node
 
 
-def _image_node(mat, image, uv_map=BASE_UV):
-    """Bildtextur mit ausdrücklicher UV-Map – eingebrannte Flächen haben eine zweite."""
-    node = mat.node_tree.nodes.new("ShaderNodeTexImage")
+def _image_node(mat, image, uv_map=BASE_UV, scale=None):
+    """Bildtextur mit ausdrücklicher UV-Map – eingebrannte Flächen haben eine zweite.
+    ``scale``: Wiederholungen je Meter (UVs sind in Metern) – glTF: KHR_texture_transform, so
+    passen Varianten mit anderem Belag auf dieselbe Geometrie."""
+    tree = mat.node_tree
+    node = tree.nodes.new("ShaderNodeTexImage")
     node.image = image
-    mat.node_tree.links.new(_uv_node(mat, uv_map).outputs["UV"], node.inputs["Vector"])
+    source = _uv_node(mat, uv_map).outputs["UV"]
+    if scale is not None:
+        mapping = tree.nodes.new("ShaderNodeMapping")
+        mapping.vector_type = "POINT"
+        mapping.inputs["Scale"].default_value = (scale[0], scale[1], 1.0)
+        tree.links.new(source, mapping.inputs["Vector"])
+        source = mapping.outputs["Vector"]
+    tree.links.new(source, node.inputs["Vector"])
     return node
 
 
-def _normal_node(mat, bsdf, image, strength=1.0):
+def _normal_node(mat, bsdf, image, strength=1.0, scale=None):
     if image is None:
         return
     links = mat.node_tree.links
-    tex = _image_node(mat, image)
+    tex = _image_node(mat, image, scale=scale)
     normal = mat.node_tree.nodes.new("ShaderNodeNormalMap")
     normal.uv_map = BASE_UV
     normal.inputs["Strength"].default_value = strength
@@ -253,38 +264,41 @@ def glass_material():
 
 def surface_material(surface):
     """Material aus der Oberflächenbeschreibung (siehe lumira_generator.logic.surfaces)."""
-    key = json.dumps(surface, sort_keys=True)
+    # gleicher Belag = gleiches Material, egal ob „ausgeliehen“ (from_variant) oder nicht
+    key = json.dumps({k: v for k, v in surface.items() if k != "from_variant"}, sort_keys=True)
     if key in _materials:
         return _materials[key]
     kind = surface.get("kind", "plain")
     name, color = surface["name"], surface["color"]
+    su, sv = uv_size_m(surface)
+    scale = (1.0 / su, 1.0 / sv)
     links = None
     mat = None
     if kind == "texture" and texture_images(surface["texture"]):
-        diff, normal, rough = texture_images(surface["texture"])
-        mat, bsdf = _principled(name, hex_to_rgba(color), 0.45)
+        diff, normal, _rough = texture_images(surface["texture"])
+        # Keine Rauheitstextur: der glTF-Export packt sie sonst mit der Lightmap (Occlusion) in
+        # ein Bild – die Lichtfarbe wäre verfälscht. Fester Wert sieht bei Holz kaum anders aus.
+        mat, bsdf = _principled(name, hex_to_rgba(color), 0.5)
         links = mat.node_tree.links
-        links.new(_image_node(mat, diff).outputs["Color"], bsdf.inputs["Base Color"])
-        if rough is not None:
-            links.new(_image_node(mat, rough).outputs["Color"], bsdf.inputs["Roughness"])
-        _normal_node(mat, bsdf, normal)
+        links.new(_image_node(mat, diff, scale=scale).outputs["Color"], bsdf.inputs["Base Color"])
+        _normal_node(mat, bsdf, normal, scale=scale)
     elif kind == "tiles":
         color_img, normal = tile_images(color, surface["tile_mm"], surface["grout_mm"])
         mat, bsdf = _principled(name, hex_to_rgba(color), 0.3)
         mat.node_tree.links.new(
-            _image_node(mat, color_img).outputs["Color"], bsdf.inputs["Base Color"]
+            _image_node(mat, color_img, scale=scale).outputs["Color"], bsdf.inputs["Base Color"]
         )
-        _normal_node(mat, bsdf, normal, strength=0.8)
+        _normal_node(mat, bsdf, normal, strength=0.8, scale=scale)
     elif kind == "plaster":
         mat, bsdf = _principled(name, hex_to_rgba(color), 0.9)
-        _normal_node(mat, bsdf, plaster_normal(), strength=0.35)
+        _normal_node(mat, bsdf, plaster_normal(), strength=0.35, scale=scale)
     elif kind == "carpet":
         color_img, normal = carpet_images(color)
         mat, bsdf = _principled(name, hex_to_rgba(color), 1.0)
         mat.node_tree.links.new(
-            _image_node(mat, color_img).outputs["Color"], bsdf.inputs["Base Color"]
+            _image_node(mat, color_img, scale=scale).outputs["Color"], bsdf.inputs["Base Color"]
         )
-        _normal_node(mat, bsdf, normal, strength=0.6)
+        _normal_node(mat, bsdf, normal, strength=0.6, scale=scale)
     else:
         mat = _principled(name, hex_to_rgba(color), surface.get("roughness", 0.7))[0]
     _materials[key] = mat
@@ -380,7 +394,7 @@ def apply_wall_materials(obj, finish):
     """Wandseiten in der Wandoberfläche, die Oberseite (Wandkrone) dunkel: von oben ist der
     Grundriss so sofort lesbar – auch in Viewern ohne Schatten/Umgebungsverdeckung."""
     mesh = obj.data
-    box_uv(obj, uv_size_m(finish))
+    box_uv(obj, UV_METERS)
     mesh.materials.append(surface_material(finish))
     mesh.materials.append(material("Wandkrone", WALL_CROWN_COLOR, roughness=0.9))
     top = max(v.co.z for v in mesh.vertices)
@@ -567,8 +581,10 @@ def build_threshold(frame, opening):
     bm.free()
     obj = bpy.data.objects.new(f"Floor_threshold_{opening['id']}", mesh)
     bpy.context.scene.collection.objects.link(obj)
+    if opening.get("threshold_room"):
+        obj["lumira_room_id"] = opening["threshold_room"]
     surface = opening["threshold"]
-    box_uv(obj, uv_size_m(surface))
+    box_uv(obj, UV_METERS)
     mesh.materials.append(surface_material(surface))
 
 
@@ -585,20 +601,36 @@ def build_floor(room):
     obj = bpy.data.objects.new(f"Floor_{room['id']}_{room['type']}", mesh)
     bpy.context.scene.collection.objects.link(obj)
     obj["lumira_room_type"] = room["type"]
+    obj["lumira_room_id"] = room["id"]  # Varianten: Bodenbelag dieses Raums
     obj["lumira_label"] = room.get("label") or ""
     floor = room["floor"]
     xs = [x for x, _ in room["polygon"]]
     ys = [y for _, y in room["polygon"]]
     # Dielen laufen in Längsrichtung des Raums (Textur: Dielen liegen waagerecht im Bild).
     rotate = floor.get("kind") == "texture" and (max(ys) - min(ys)) > (max(xs) - min(xs))
-    box_uv(obj, uv_size_m(floor), rotate=rotate)
+    box_uv(obj, UV_METERS, rotate=rotate)
     obj.data.materials.append(surface_material(floor))
 
 
 # ------------------------------------------------------------------ Decken und Licht
 CEILING_COLOR = "#F7F6F3"
 LAMP_COLOR = "#FFF4E2"
-LAMP_WATT = 60.0
+LAMP_WATT_PER_M2 = 2.0  # gleichmäßige Helligkeit: große Räume stärkere Leuchte, Flur/WC schwächer
+LAMP_WATT_RANGE = (15.0, 100.0)
+
+
+def lamp_watt(polygon_m):
+    area = (
+        abs(
+            sum(
+                x1 * y2 - x2 * y1
+                for (x1, y1), (x2, y2) in zip(polygon_m, polygon_m[1:] + polygon_m[:1], strict=True)
+            )
+        )
+        / 2
+    )
+    low, high = LAMP_WATT_RANGE
+    return min(max(area * LAMP_WATT_PER_M2, low), high)
 
 
 def emissive_material(name, hex_color, strength):
@@ -707,7 +739,7 @@ def build_ceiling(room, height, holes=(), slab=0.0):
     light = bpy.data.objects.new(f"Licht_{room['id']}", bpy.data.lights.new(room["id"], "AREA"))
     light.data.shape = "DISK"
     light.data.size = 0.34
-    light.data.energy = LAMP_WATT
+    light.data.energy = lamp_watt(polygon)
     light.data.color = (1.0, 0.93, 0.84)  # warmweiß
     light.location = (cx, cy, height - 0.045)
     bpy.context.scene.collection.objects.link(light)
@@ -725,7 +757,8 @@ def build_stair(stair):
     side_mat = material("Treppe", STAIR_SIDE_COLOR, roughness=0.5)
     for k, step in enumerate(stair["steps"]):
         obj = prism(f"Stufe_{stair['id']}_{k:02d}", step["polygon"], step["top"] * MM)
-        box_uv(obj, uv_size_m(tread))
+        obj["lumira_stair_id"] = stair["id"]  # Varianten: Stufenbelag (Materialplatz 0)
+        box_uv(obj, UV_METERS)
         mesh = obj.data
         mesh.materials.append(top_mat)
         mesh.materials.append(side_mat)
@@ -1292,6 +1325,65 @@ def _gltf_output_group():
     return group
 
 
+_lightmap = {}
+
+
+def _occlusion_output(tree, image_node):
+    split = tree.nodes.new("ShaderNodeSeparateColor")
+    output = tree.nodes.new("ShaderNodeGroup")
+    output.node_tree = _gltf_output_group()
+    tree.links.new(image_node.outputs["Color"], split.inputs["Color"])
+    tree.links.new(split.outputs["Red"], output.inputs["Occlusion"])
+
+
+def wire_lightmap(mat):
+    """Fertige Lightmap an ein weiteres Material hängen (Variantenmaterialien)."""
+    image = _lightmap.get("image")
+    if image is None or mat.node_tree.get("lumira_lightmap"):
+        return
+    _occlusion_output(mat.node_tree, _image_node(mat, image, uv_map=LIGHTMAP_UV))
+    mat.node_tree["lumira_lightmap"] = True
+
+
+def apply_variants(scene_spec):
+    """Ausstattungsvarianten als glTF KHR_materials_variants: je Boden (Raum, Schwelle) und
+    Stufe ein Material pro Variante. Geometrie und eingebranntes Licht bleiben gleich.
+    Liefert die Variantennamen."""
+    variants = scene_spec.get("variants") or []
+    if len(variants) < 2:
+        return []
+    # Die Datenstrukturen registriert das glTF-Addon erst mit eingeschalteter Varianten-Oberfläche
+    bpy.context.preferences.addons["io_scene_gltf2"].preferences.KHR_materials_variants_ui = True
+    scene = bpy.data.scenes[0]
+    for idx, variant in enumerate(variants):
+        item = scene.gltf2_KHR_materials_variants_variants.add()
+        item.variant_idx = idx
+        item.name = variant["name"]
+    for obj in scene.objects:
+        if obj.type != "MESH":
+            continue
+        if obj.get("lumira_room_id"):
+            surfaces = [v["floors"].get(obj["lumira_room_id"]) for v in variants]
+        elif obj.get("lumira_stair_id"):
+            surfaces = [v["treads"].get(obj["lumira_stair_id"]) for v in variants]
+        else:
+            continue
+        by_material = {}
+        for idx, surface in enumerate(surfaces):
+            if surface is None:
+                continue
+            mat = surface_material(surface)
+            wire_lightmap(mat)
+            by_material.setdefault(mat, []).append(idx)
+        for mat, indices in by_material.items():
+            mapping = obj.data.gltf2_variant_mesh_data.add()
+            mapping.material_slot_index = 0
+            mapping.material = mat
+            for idx in indices:
+                mapping.variants.add().variant.variant_idx = idx
+    return [v["name"] for v in variants]
+
+
 def bake_lighting(size, samples, samples_gpu=None):
     """Tageslicht (Himmel + Sonne durch die Fenster) und Deckenleuchten mit indirektem Licht
     in eine gemeinsame Lightmap brennen. Gespeichert als glTF-Occlusion-Textur auf TEXCOORD_1:
@@ -1387,15 +1479,12 @@ def bake_lighting(size, samples, samples_gpu=None):
     lightmap.pack()
     bpy.data.images.remove(raw)
 
-    group = _gltf_output_group()
+    _lightmap["image"] = lightmap
     for node in bake_nodes:
         tree = node.id_data
         node.image = lightmap
-        split = tree.nodes.new("ShaderNodeSeparateColor")
-        output = tree.nodes.new("ShaderNodeGroup")
-        output.node_tree = group
-        tree.links.new(node.outputs["Color"], split.inputs["Color"])
-        tree.links.new(split.outputs["Red"], output.inputs["Occlusion"])
+        _occlusion_output(tree, node)
+        tree["lumira_lightmap"] = True
     scene["lumira_lightmap"] = {"encoding": "reinhard", "key": key, "uv": 1}
     return {
         "px": size,
@@ -1440,6 +1529,7 @@ def main():
     lightmap = None
     if args.bake_samples > 0:
         lightmap = bake_lighting(args.lightmap_px, args.bake_samples, args.bake_samples_gpu)
+    variants = apply_variants(scene_spec)  # nach dem Einbrennen: Lightmap an Variantenmaterial
 
     bpy.ops.export_scene.fbx(
         filepath=args.fbx,
@@ -1470,6 +1560,7 @@ def main():
         "materials": len(bpy.data.materials),
         "textures": textured,
         "lightmap": lightmap,
+        "variants": variants,
         "blender": bpy.app.version_string,
     }
     print("LUMIRA_RESULT " + json.dumps(stats), flush=True)

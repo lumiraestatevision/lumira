@@ -131,7 +131,13 @@ def _step_surface(surface: dict[str, Any]) -> dict[str, Any]:
     """Stufen sind aus einem Stück (Stufenplatte): Fliesen ohne Fugenraster, leicht glänzend."""
     if surface.get("kind") != "tiles":
         return surface
-    return {"name": surface["name"], "color": surface["color"], "kind": "plain", "roughness": 0.35}
+    # eigener Name: dasselbe LV-Material als Fliese (Boden) und als Stufenplatte sind zwei
+    # verschiedene Materialien im Modell
+    lower = surface["name"].lower()
+    name = (
+        surface["name"] if "treppe" in lower or "stufe" in lower else f"{surface['name']} (Stufen)"
+    )
+    return {"name": name, "color": surface["color"], "kind": "plain", "roughness": 0.35}
 
 
 def _stair_tread(
@@ -177,12 +183,10 @@ def _stairs(plan: FloorPlan, blv: BLVResult, variant: str | None) -> list[dict[s
     ]
 
 
-def _threshold(
-    plan: FloorPlan, wall: Wall, opening: Opening, floors: dict[str, dict[str, Any]]
-) -> dict[str, Any] | None:
+def _threshold_room(plan: FloorPlan, wall: Wall, opening: Opening) -> str | None:
     """Boden in Türen und Durchgängen: Die Raumböden enden an der Wandfläche – ohne Schwelle
     klafft in der Wanddicke eine Lücke (sichtbar und im Rundgang eine Absturzkante). Belag des
-    Raums, in den die Tür aufschlägt, sonst des ersten angrenzenden Raums."""
+    Raums, in den die Tür aufschlägt, sonst des ersten angrenzenden Raums (liefert dessen ID)."""
     if opening.type is OpeningType.WINDOW:
         return None
     length = wall.length_mm or 1.0
@@ -198,13 +202,47 @@ def _threshold(
         point = (cx + nx * reach, cy + ny * reach)
         for room in plan.rooms:
             if point_in_polygon(point, [(p.x, p.y) for p in room.polygon]):
-                return floors[room.id]
+                return room.id
     return None
+
+
+def _variants(plan: FloorPlan, blv: BLVResult, chosen: str | None) -> list[dict[str, Any]]:
+    """Ausstattungsvarianten aus dem LV: Bodenbelag je Raum und Stufenbelag je Treppe. Im Modell
+    als umschaltbare Materialsätze (glTF KHR_materials_variants). Nur Varianten, die in diesem
+    Grundriss etwas ändern (z. B. kein „Balkon“ ohne Balkon); leer, wenn keine übrig bleibt."""
+
+    def plain(surface: dict[str, Any]) -> dict[str, Any]:
+        # Herkunft („ausgeliehen aus Variante …“) ist für den Vergleich/Wechsel ohne Belang
+        return {k: v for k, v in surface.items() if k != "from_variant"}
+
+    def surfaces(name: str | None) -> dict[str, Any]:
+        return {
+            "floors": {r.id: plain(_floor_for(blv, r.room_type, name)) for r in plan.rooms},
+            "treads": {s.id: plain(_stair_tread(plan, s, blv, name)) for s in plan.stairs},
+        }
+
+    # LVs führen Varianten oft als Einzeloptionen („Parkett statt Estrich“, „Fliesen im WC“):
+    # Räume ohne eigenen Belag in einer Variante zeigen den Belag der Grundansicht. Leiht die
+    # Grundansicht selbst aus anderen Varianten, ist sie eine Musterausstattung, kein „Standard“.
+    borrowed = any("from_variant" in _floor_for(blv, r.room_type, chosen) for r in plan.rooms)
+    seen = [surfaces(chosen)]
+    variants = [{"name": "Musterausstattung" if borrowed else chosen or "Standard", **seen[0]}]
+    for variant in blv.variants:
+        other = surfaces(variant.name)
+        if variant.name != chosen and other not in seen:  # gleiche Beläge nur einmal
+            seen.append(other)
+            variants.append({"name": variant.name, **other})
+    return variants if len(variants) > 1 else []
 
 
 def build_scene(plan: FloorPlan, blv: BLVResult, *, variant: str | None = None) -> dict[str, Any]:
     chosen = variant or (blv.default_variant.name if blv.default_variant else None)
     floors = {room.id: _floor_for(blv, room.room_type, chosen) for room in plan.rooms}
+    thresholds = {
+        o.id: _threshold_room(plan, plan.wall(o.wall_id), o)
+        for o in plan.openings
+        if o.type is not OpeningType.WINDOW
+    }
     walls = [
         {
             "id": wall.id,
@@ -225,7 +263,8 @@ def build_scene(plan: FloorPlan, blv: BLVResult, *, variant: str | None = None) 
                     "sill": o.sill_height_mm,
                     "swing": str(o.swing) if o.swing else None,
                     "opens_to": o.opens_to,
-                    "threshold": _threshold(plan, wall, o, floors),
+                    "threshold": floors[room] if (room := thresholds.get(o.id)) else None,
+                    "threshold_room": thresholds.get(o.id),  # Belag folgt der Variante
                 }
                 for o in plan.openings_in(wall.id)
             ],
@@ -252,6 +291,7 @@ def build_scene(plan: FloorPlan, blv: BLVResult, *, variant: str | None = None) 
         "walls": walls,
         "rooms": rooms,
         "stairs": _stairs(plan, blv, chosen),
+        "variants": _variants(plan, blv, chosen),
         # Einrichtung: feste Ausstattung (Küche, Sanitär) + lose Möbel (im Viewer ausblendbar)
         "fixtures": furnish(plan, blv),
     }
