@@ -1,4 +1,4 @@
-"""Grundriss-Modelle: FloorPlan, Wall, Opening, Room.
+"""Grundriss-Modelle: FloorPlan, Wall, Opening, Room, Stair.
 
 Ein FloorPlan wird entlang der Pipeline schrittweise angereichert:
 parser (Rohgeometrie) → recognizer (Wände, Öffnungen, Räume) → classifier (Raumtypen).
@@ -17,6 +17,7 @@ from lumira_shared.models.base import LumiraModel, new_id
 from lumira_shared.models.geometry import Confidence, Point2D, Polygon, polygon_area_mm2
 
 DEFAULT_WALL_HEIGHT_MM = 2500.0  # übliche lichte Raumhöhe im Wohnungsbau
+DEFAULT_FLOOR_TO_FLOOR_MM = 2750.0  # Geschosshöhe (lichte Höhe + Decke) ohne Planangabe
 
 
 class SourceFormat(StrEnum):
@@ -123,6 +124,22 @@ class Room(LumiraModel):
         return round(polygon_area_mm2(self.polygon) / 1_000_000, 2)
 
 
+class Stair(LumiraModel):
+    """Treppe aus dem Plan: Auftrittsflächen in Laufrichtung (von unten nach oben).
+
+    Stufe ``k`` (0-basiert) hat ihre Oberkante auf ``(k + 1) * rise_mm``; die letzte Fläche ist
+    der Austritt auf Höhe des oberen Geschosses (``floor_to_floor_mm``).
+    """
+
+    id: str = Field(default_factory=lambda: new_id("stair"))
+    steps: list[Polygon] = Field(min_length=1)
+    rise_mm: float = Field(gt=0)
+    floor_to_floor_mm: float = Field(default=DEFAULT_FLOOR_TO_FLOOR_MM, gt=0)
+    walking_line: list[Point2D] = Field(default_factory=list, description="Lauflinie, Start → Ziel")
+    outline: Polygon = Field(description="Umriss (konvexe Hülle) – Deckenöffnung, Sperrfläche")
+    confidence: Confidence = 1.0
+
+
 class FloorPlan(LumiraModel):
     project_id: UUID
     source_key: str = Field(description="S3-Key der Originaldatei")
@@ -134,12 +151,16 @@ class FloorPlan(LumiraModel):
     walls: list[Wall] = Field(default_factory=list)
     openings: list[Opening] = Field(default_factory=list)
     rooms: list[Room] = Field(default_factory=list)
+    stairs: list[Stair] = Field(default_factory=list)
     metadata: dict[str, str] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _check_references(self) -> Self:
         all_ids = (
-            [w.id for w in self.walls] + [o.id for o in self.openings] + [r.id for r in self.rooms]
+            [w.id for w in self.walls]
+            + [o.id for o in self.openings]
+            + [r.id for r in self.rooms]
+            + [s.id for s in self.stairs]
         )
         duplicates = sorted(i for i, n in Counter(all_ids).items() if n > 1)
         if duplicates:

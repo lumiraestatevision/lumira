@@ -10,6 +10,7 @@ from lumira_shared.models.blv import (
     MaterialLocation,
 )
 from lumira_shared.models.floorplan import (
+    DEFAULT_FLOOR_TO_FLOOR_MM,
     DEFAULT_WALL_HEIGHT_MM,
     DoorSwing,
     FloorPlan,
@@ -18,12 +19,14 @@ from lumira_shared.models.floorplan import (
     Room,
     RoomType,
     SourceFormat,
+    Stair,
     Wall,
 )
 from lumira_shared.models.geometry import Confidence, Point2D, Polygon, polygon_area_mm2
 from lumira_shared.models.parsed import FilledArea, ParsedPlan, Segment, Stroke, TextItem
 
 __all__ = [
+    "DEFAULT_FLOOR_TO_FLOOR_MM",
     "DEFAULT_WALL_HEIGHT_MM",
     "BLVResult",
     "ColorSource",
@@ -45,6 +48,7 @@ __all__ = [
     "RoomType",
     "Segment",
     "SourceFormat",
+    "Stair",
     "Stroke",
     "TextItem",
     "Wall",

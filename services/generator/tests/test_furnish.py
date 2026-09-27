@@ -7,7 +7,9 @@ import uuid
 from collections import Counter
 from itertools import combinations
 
-from lumira_generator.logic.furnish import Rect, furnish, overlaps, rect_in_polygon
+import pytest
+
+from lumira_generator.logic.furnish import Rect, furnish, hull_rect, overlaps, rect_in_polygon
 from lumira_shared.models import (
     BLVResult,
     EquipmentVariant,
@@ -20,6 +22,7 @@ from lumira_shared.models import (
     Room,
     RoomType,
     SourceFormat,
+    Stair,
     Wall,
 )
 
@@ -137,6 +140,53 @@ def test_walkways_in_front_of_doors_stay_free() -> None:
     for item in furnish(plan, _blv()):
         assert not overlaps(_rect(item), terrace, margin=50), item["kind"]
         assert not overlaps(_rect(item), door, margin=50), item["kind"]
+
+
+def test_stair_and_its_landing_stay_free() -> None:
+    """Treppe im Wohnraum: keine Möbel auf den Stufen und 1 m vor dem Antritt."""
+    plan = _plan(
+        6_000,
+        5_000,
+        RoomType.LIVING,
+        [
+            ("unten", OpeningType.WINDOW, 1_000, 2_400, 0),
+            ("links", OpeningType.DOOR, 3_600, 900, 0),
+        ],
+        label="Wohnen/Essen",
+    )
+    # Lauf an der rechten Wand, Antritt bei y 3000, Austritt an der Außenwand unten
+    steps = [
+        [
+            Point2D(x=x, y=y)
+            for x, y in ((5_000, y0), (6_000, y0), (6_000, y0 + 250), (5_000, y0 + 250))
+        ]
+        for y0 in range(2_750, -250, -250)
+    ]
+    corners = ((5_000, 0), (6_000, 0), (6_000, 3_000), (5_000, 3_000))
+    plan.stairs = [
+        Stair(
+            steps=steps,
+            rise_mm=2_750 / len(steps),
+            walking_line=[Point2D(x=5_500, y=2_875), Point2D(x=5_500, y=2_750)],
+            outline=[Point2D(x=x, y=y) for x, y in corners],
+        )
+    ]
+    stair = Rect(5_500, 1_500, math.pi / 2, 1_000, 3_000)
+    landing = Rect(5_500, 3_500, math.pi / 2, 1_000, 1_000)
+
+    items = furnish(plan, _blv())
+
+    assert Counter(i["kind"] for i in items)["sofa"] == 1
+    for item in items:
+        assert not overlaps(_rect(item), stair, margin=20), item["kind"]
+        assert not overlaps(_rect(item), landing, margin=20), item["kind"]
+
+
+def test_hull_rect_is_the_tight_box() -> None:
+    diamond = [(0.0, -1.0), (1.0, 0.0), (0.0, 1.0), (-1.0, 0.0)]
+    rect = hull_rect(diamond)
+    assert rect.w * rect.d == pytest.approx(2.0)
+    assert (rect.cx, rect.cy) == (pytest.approx(0.0, abs=1e-9), pytest.approx(0.0, abs=1e-9))
 
 
 def test_bed_head_avoids_the_window_wall() -> None:

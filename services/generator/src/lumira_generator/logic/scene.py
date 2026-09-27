@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from lumira_generator.logic.furnish import furnish
+from lumira_generator.logic.furnish import furnish, point_in_polygon
 from lumira_generator.logic.surfaces import describe
 from lumira_shared.models import (
     BLVResult,
@@ -18,6 +18,7 @@ from lumira_shared.models import (
     MaterialCategory,
     MaterialLocation,
     RoomType,
+    Stair,
 )
 
 FALLBACK_FLOOR = {"name": "Estrich", "color": "#9E9A93"}
@@ -25,6 +26,7 @@ FALLBACK_WALL = {"name": "Wandfarbe weiß", "color": "#F1ECE1"}
 FALLBACK_DOOR = {"name": "Innentür weiß", "color": "#F2F1EC"}
 FALLBACK_WINDOW = {"name": "Fensterrahmen weiß", "color": "#F4F4F2"}
 _FLOOR_CATEGORIES = (MaterialCategory.FLOORING, MaterialCategory.TILES)
+_RAILING = re.compile(r"geländer|handlauf|brüstung|stab|pfosten")
 
 
 def _floor_score(material: Material, room_type: RoomType) -> tuple[int, ...]:
@@ -122,6 +124,56 @@ def _window_frame(blv: BLVResult, variant: str | None) -> dict[str, str]:
     return _color(frame, FALLBACK_WINDOW)
 
 
+def _step_surface(surface: dict[str, Any]) -> dict[str, Any]:
+    """Stufen sind aus einem Stück (Stufenplatte): Fliesen ohne Fugenraster, leicht glänzend."""
+    if surface.get("kind") != "tiles":
+        return surface
+    return {"name": surface["name"], "color": surface["color"], "kind": "plain", "roughness": 0.35}
+
+
+def _stair_tread(
+    plan: FloorPlan, stair: Stair, blv: BLVResult, variant: str | None
+) -> dict[str, Any]:
+    """Stufenbelag laut LV (Kategorie Treppe, ohne Geländer) – sonst der Boden des Raums am
+    Antritt."""
+    treads = [
+        m
+        for m in blv.materials_for(variant=variant)
+        if m.category is MaterialCategory.STAIRS
+        and m.is_visible_inside
+        and not _RAILING.search(m.name.lower())
+    ]
+    if treads:
+        return _step_surface(describe(treads[0], fallback=FALLBACK_FLOOR))
+    start = stair.walking_line[0] if stair.walking_line else stair.steps[0][0]
+    room_type = next(
+        (
+            room.room_type
+            for room in plan.rooms
+            if point_in_polygon((start.x, start.y), [(p.x, p.y) for p in room.polygon])
+        ),
+        RoomType.HALLWAY,
+    )
+    return _step_surface(_floor_for(blv, room_type, variant))
+
+
+def _stairs(plan: FloorPlan, blv: BLVResult, variant: str | None) -> list[dict[str, Any]]:
+    return [
+        {
+            "id": stair.id,
+            # Stufe k: massiver Block bis zur Oberkante (k + 1) · Steigung; letzte = oberes Geschoss
+            "steps": [
+                {"polygon": [[p.x, p.y] for p in polygon], "top": (k + 1) * stair.rise_mm}
+                for k, polygon in enumerate(stair.steps)
+            ],
+            "outline": [[p.x, p.y] for p in stair.outline],
+            "floor_to_floor": stair.floor_to_floor_mm,
+            "tread": _stair_tread(plan, stair, blv, variant),
+        }
+        for stair in plan.stairs
+    ]
+
+
 def build_scene(plan: FloorPlan, blv: BLVResult, *, variant: str | None = None) -> dict[str, Any]:
     chosen = variant or (blv.default_variant.name if blv.default_variant else None)
     walls = [
@@ -169,6 +221,7 @@ def build_scene(plan: FloorPlan, blv: BLVResult, *, variant: str | None = None) 
         "window_frame": _window_frame(blv, chosen),
         "walls": walls,
         "rooms": rooms,
+        "stairs": _stairs(plan, blv, chosen),
         # Einrichtung: feste Ausstattung (Küche, Sanitär) + lose Möbel (im Viewer ausblendbar)
         "fixtures": furnish(plan, blv),
     }

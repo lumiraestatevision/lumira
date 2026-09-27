@@ -162,16 +162,19 @@ dafür fehlt bisher die Zielplattform.
 - **3D-Modell**: Wände, Böden mit echten Materialien aus dem LV (Holz als Fototextur in
   realer Größe, Fliesen im LV-Format, Putz), Türen (Zarge, geöffnetes Blatt), Fenster (Rahmen,
   Glas), Decken mit Leuchten, Küche und Sanitär laut LV, lose Möbel regelbasiert platziert
-  (in der Vorschau per Knopf ausblendbar). Noch nicht: Licht (Baking), Treppen, begehbarer
-  Viewer / WebXR – als Nächstes geplant (Weg „Browser + WebXR“).
+  (in der Vorschau per Knopf ausblendbar), Treppen als massive Stufen (Belag laut LV) mit
+  Deckenöffnung. Noch nicht: Licht (Baking), Geländer, Obergeschoss, begehbarer Viewer / WebXR
+  – als Nächstes geplant (Weg „Browser + WebXR“).
 - **Unreal Engine**: nur Stub (schreibt ein Manifest). Echter Betrieb später auf einem GPU-Server.
 - **DWG**: wird mit klarer Fehlermeldung abgelehnt – bitte als DXF exportieren.
 - **PDF-Maßstab**: aus dem Schriftfeld („Maßstab 1:100“), sonst 1:100 angenommen; geprüft und
   bei Bedarf korrigiert über die Flächenangaben im Plan („F: 14,58 m²“).
 - **Erkennung**: CAD-PDFs mit gefüllten Wänden (üblicher Export von Archicad, Allplan & Co.)
   werden exakt ausgelesen – Wände mit echtem Grundriss, Fenster, Türen (über den Aufschlagbogen),
-  Durchgänge, Räume mit Beschriftung. Pläne ohne gefüllte Wände: einfaches Linienverfahren
-  mit Platzhalter-Öffnungen. Treppen, Terrassen und Balkone werden noch nicht als Räume erkannt.
+  Durchgänge, Räume mit Beschriftung, Treppen (gerade und gewendelt, Laufrichtung über
+  Antrittssymbol/Pfeil; Steigung aus 2,75 m Geschosshöhe angenommen). Pläne ohne gefüllte
+  Wände: einfaches Linienverfahren mit Platzhalter-Öffnungen. Terrassen und Balkone werden
+  noch nicht als Räume erkannt.
   KI-Erkennung gescannter Pläne ist ein Stub (die GPU wird dafür vorbereitet, aber noch nicht genutzt).
 - **Raumklassifikation ohne Beschriftung**: Modell mit synthetischen Referenzdaten.
 - **Farben**: Ohne Farbangabe im LV werden Farben aus Material/Kategorie angenommen und als

@@ -88,7 +88,7 @@ def describe(
         return {**base, "kind": "tiles", "tile_mm": list(tile), "grout_mm": _grout(tile)}
     if _CARPET.search(text):
         return {**base, "kind": "carpet"}
-    if material.category is MaterialCategory.FLOORING:
+    if material.category in (MaterialCategory.FLOORING, MaterialCategory.STAIRS):
         for pattern, texture in _WOOD_RULES:
             if pattern.search(text):
                 return {

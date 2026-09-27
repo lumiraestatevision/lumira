@@ -22,6 +22,7 @@ from lumira_shared.models import (
     Room,
     RoomType,
     SourceFormat,
+    Stair,
     Wall,
 )
 
@@ -116,6 +117,79 @@ def test_scene_passes_exact_wall_footprint() -> None:
     [wall] = build_scene(plan, _blv(plan.project_id))["walls"]
 
     assert wall["footprint"] == [[float(x), float(y)] for x, y in l_shape]
+
+
+def _stair(steps: int = 10) -> Stair:
+    def rect(y0: float) -> list[Point2D]:
+        return [
+            Point2D(x=x, y=y)
+            for x, y in ((500, y0), (1_500, y0), (1_500, y0 + 250), (500, y0 + 250))
+        ]
+
+    return Stair(
+        id="treppe",
+        steps=[rect(250 + k * 250) for k in range(steps)],
+        rise_mm=2_750 / steps,
+        walking_line=[Point2D(x=1_000, y=375), Point2D(x=1_000, y=250 + steps * 250 - 125)],
+        outline=[
+            Point2D(x=500, y=250),
+            Point2D(x=1_500, y=250),
+            Point2D(x=1_500, y=250 + steps * 250),
+            Point2D(x=500, y=250 + steps * 250),
+        ],
+    )
+
+
+def test_stairs_use_lv_tread_or_the_floor_at_the_start() -> None:
+    plan = _plan()
+    plan.rooms = [r for r in plan.rooms if r.id == "flur"]
+    plan.stairs = [_stair()]
+    blv = _blv(plan.project_id)
+
+    [stair] = build_scene(plan, blv)["stairs"]
+
+    assert stair["tread"]["name"] == "Parkett"  # Boden der Diele am Antritt
+    assert [s["top"] for s in stair["steps"]] == pytest.approx([275.0 * k for k in range(1, 11)])
+    assert stair["floor_to_floor"] == 2_750
+    assert stair["outline"][2] == [1_500.0, 2_750.0]
+
+    blv.materials += [
+        Material(
+            id="gel", category=MaterialCategory.STAIRS, name="Stahlgeländer", color_hex="#333333"
+        ),
+        Material(id="stufe", category=MaterialCategory.STAIRS, name="Stufen Eiche massiv"),
+    ]
+    blv.variants[0].material_ids += ["gel", "stufe"]
+
+    [stair] = build_scene(plan, blv)["stairs"]
+
+    assert stair["tread"]["name"] == "Stufen Eiche massiv"  # Stufenbelag laut LV, kein Geländer
+    assert stair["tread"]["kind"] == "texture"
+
+
+def test_tiled_stairs_get_solid_step_plates() -> None:
+    """Muster1-LV: „Treppenbelag Feinsteinzeug anthrazit“ – Stufen ohne Fugenraster."""
+    plan = _plan()
+    plan.stairs = [_stair()]
+    blv = _blv(plan.project_id)
+    blv.materials.append(
+        Material(
+            id="stufe",
+            category=MaterialCategory.STAIRS,
+            name="Treppenbelag Feinsteinzeug anthrazit",
+            color_hex="#404040",
+        )
+    )
+    blv.variants[0].material_ids.append("stufe")
+
+    [stair] = build_scene(plan, blv)["stairs"]
+
+    assert stair["tread"] == {
+        "name": "Treppenbelag Feinsteinzeug anthrazit",
+        "color": "#404040",
+        "kind": "plain",
+        "roughness": 0.35,
+    }
 
 
 def test_only_visible_interior_surfaces_are_used() -> None:

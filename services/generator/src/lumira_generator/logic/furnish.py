@@ -118,7 +118,7 @@ def overlaps(a: Rect, b: Rect, margin: float = 10.0) -> bool:
     return True
 
 
-def _inside(point: tuple[float, float], polygon: list[tuple[float, float]]) -> bool:
+def point_in_polygon(point: tuple[float, float], polygon: list[tuple[float, float]]) -> bool:
     x, y = point
     inside = False
     for (x1, y1), (x2, y2) in zip(polygon, polygon[1:] + polygon[:1], strict=True):
@@ -131,11 +131,49 @@ def rect_in_polygon(rect: Rect, polygon: list[tuple[float, float]], tolerance: f
     shrunk = Rect(
         rect.cx, rect.cy, rect.angle, max(rect.w - tolerance, 1), max(rect.d - tolerance, 1)
     )
-    if not all(_inside(c, polygon) for c in shrunk.corners()):
+    if not all(point_in_polygon(c, polygon) for c in shrunk.corners()):
         return False
     # Einspringende Ecken (L-förmige Räume) dürfen nicht im Rechteck liegen.
     box = shrunk.corners()
-    return not any(_inside(v, box) for v in polygon)
+    return not any(point_in_polygon(v, box) for v in polygon)
+
+
+def hull_rect(points: list[tuple[float, float]]) -> Rect:
+    """Kleinstes umschließendes Rechteck eines konvexen Umrisses (Kanten als Kandidaten)."""
+    best: Rect | None = None
+    for (x1, y1), (x2, y2) in zip(points, points[1:] + points[:1], strict=True):
+        if math.hypot(x2 - x1, y2 - y1) < 1.0:
+            continue
+        angle = math.atan2(y2 - y1, x2 - x1)
+        ux, uy = math.cos(angle), math.sin(angle)
+        along = [x * ux + y * uy for x, y in points]
+        across = [-x * uy + y * ux for x, y in points]
+        a0, a1, c0, c1 = min(along), max(along), min(across), max(across)
+        ma, mc = (a0 + a1) / 2, (c0 + c1) / 2
+        rect = Rect(ma * ux - mc * uy, ma * uy + mc * ux, angle + math.pi / 2, a1 - a0, c1 - c0)
+        if best is None or rect.w * rect.d < best.w * best.d:
+            best = rect
+    assert best is not None, "Umriss ohne Kanten"
+    return best
+
+
+STAIR_LANDING = 1000.0  # Bewegungsfläche vor dem Antritt
+
+
+def stair_obstacles(plan: FloorPlan) -> list[Rect]:
+    """Treppen und die Bewegungsfläche vor dem Antritt – dort stehen keine Möbel."""
+    obstacles = []
+    for stair in plan.stairs:
+        obstacles.append(hull_rect([(p.x, p.y) for p in stair.outline]))
+        if len(stair.walking_line) >= 2:
+            (x0, y0), (x1, y1) = ((p.x, p.y) for p in stair.walking_line[:2])
+            length = math.hypot(x0 - x1, y0 - y1) or 1.0
+            ux, uy = (x0 - x1) / length, (y0 - y1) / length  # vom Lauf weg
+            reach = length + STAIR_LANDING / 2
+            obstacles.append(
+                Rect(x0 + ux * reach, y0 + uy * reach, math.atan2(uy, ux), 1000.0, STAIR_LANDING)
+            )
+    return obstacles
 
 
 @dataclass(slots=True)
@@ -487,12 +525,14 @@ def furnish(plan: FloorPlan, blv: BLVResult) -> list[dict[str, Any]]:
         m for m in blv.materials_for() if m.category is MaterialCategory.KITCHEN and m.color_hex
     ]
     kitchen_color = kitchens[0].color_hex if kitchens and kitchens[0].color_hex else "#F2F1EC"
+    stairs = stair_obstacles(plan)
     items: list[dict[str, Any]] = []
     for room in plan.rooms:
         polygon = _ccw([(p.x, p.y) for p in room.polygon])
         layout = Layout(polygon, room_edges(polygon, spans))
         if not layout.edges:
             continue
+        layout.placed.extend(stairs)
         label = (room.label or "").lower()
         match room.room_type:
             case RoomType.LIVING | RoomType.DINING:
@@ -509,7 +549,7 @@ def furnish(plan: FloorPlan, blv: BLVResult) -> list[dict[str, Any]]:
                 _furnish_kitchen(layout, kitchen_color)
             case RoomType.BATHROOM | RoomType.WC:
                 _furnish_wet(layout, room, lv_sanitary)
-            # Flure bleiben leer: dort liegen oft Treppen, die noch nicht erkannt werden.
+            # Flure bleiben (noch) leer; Garderobe o. Ä. folgt mit den im Plan gezeichneten Möbeln.
             case RoomType.UTILITY:
                 spot = layout.against_wall("washing_machine", corner=True, clearance=600)
                 if spot:

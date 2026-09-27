@@ -12,9 +12,10 @@ Ablauf – alles in Millimetern, ohne Lernverfahren:
   4. Außen/innen: Rasterbild aus Wänden + geschlossenen Öffnungen, Flutfüllung vom Rand.
   5. Räume: farbig hinterlegte Flächen; ohne solche die von Wänden umschlossenen Flächen.
   6. Beschriftung: alle Texte im Raum („Küche“, „F: 13,39 m²“), reine Maßzahlen ausgenommen.
+  7. Treppen: Ketten von Stufenflächen zwischen Trittkanten (stairs.py).
 
 Grenzen: Wände ohne Füllung (nur Doppellinien, Schraffur) → Rückfall auf detector.py.
-Treppen, Terrassen und Balkone werden (noch) nicht als Räume erkannt.
+Terrassen und Balkone werden (noch) nicht als Räume erkannt.
 """
 
 from __future__ import annotations
@@ -28,6 +29,7 @@ from typing import Literal
 import cv2
 import numpy as np
 
+from lumira_recognizer.logic.stairs import find_stairs
 from lumira_shared.models import (
     DoorSwing,
     FilledArea,
@@ -538,6 +540,8 @@ def recognize_cad(parsed: ParsedPlan) -> FloorPlan | None:
         for i, polygon in enumerate(polygons)
     ]
 
+    stairs = find_stairs(parsed.segments, parsed.curves, [p.points for p in pieces])
+
     counts = defaultdict(int)
     for opening in openings:
         counts[str(opening.type)] += 1
@@ -549,11 +553,14 @@ def recognize_cad(parsed: ParsedPlan) -> FloorPlan | None:
         walls=walls,
         openings=openings,
         rooms=rooms,
+        stairs=stairs,
         metadata={
             "recognizer": "cad-fills",
             "wall_color": color,
             "rooms_from": room_source,
             "openings": ", ".join(f"{k}: {v}" for k, v in sorted(counts.items())) or "keine",
+            "stairs": ", ".join(f"{len(s.steps)} Stufen à {s.rise_mm:g} mm" for s in stairs)
+            or "keine",
             "scale": f"1:{parsed.plan_scale:g}" if parsed.plan_scale else "unbekannt",
         },
     )

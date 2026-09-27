@@ -31,6 +31,7 @@ from lumira_shared.models import (
     Room,
     RoomType,
     SourceFormat,
+    Stair,
     Wall,
 )
 
@@ -152,6 +153,16 @@ def _scene() -> dict:
             Room(id="wohnen", polygon=_rect(0, 0, 6_000, 8_000), room_type=RoomType.LIVING),
             Room(id="bad", polygon=_rect(6_000, 0, 10_000, 8_000), room_type=RoomType.BATHROOM),
         ],
+        # gerade Treppe im Wohnen: 16 Auftritte à 250 mm
+        stairs=[
+            Stair(
+                id="treppe",
+                steps=[_rect(500, 1_000 + k * 250, 1_500, 1_250 + k * 250) for k in range(16)],
+                rise_mm=2_750 / 16,
+                walking_line=[Point2D(x=1_000, y=1_125), Point2D(x=1_000, y=4_875)],
+                outline=_rect(500, 1_000, 1_500, 5_000),
+            )
+        ],
     )
     blv = BLVResult(
         project_id=plan.project_id,
@@ -209,4 +220,19 @@ async def test_real_blender_exports_fbx_and_gltf(tmp_path: Path) -> None:
     assert len(gltf["images"]) >= 3  # Holz (Farbe, Normal, Rauheit) + erzeugte Fliese/Putz
     glass = next(m for m in gltf["materials"] if m["name"] == "Glas")
     assert glass["alphaMode"] == "BLEND"
+    # Treppe: 16 Stufenblöcke, Auftritt im Bodenbelag des Raums, Decke darüber mit Öffnung
+    assert (result.stats["stairs"], result.stats["steps"]) == (1, 16)
+    assert {"Stufe_treppe_00", "Stufe_treppe_15"} <= names
+    assert "Treppe" in materials
+
+    def positions(node_name: str) -> list[dict]:
+        node = next(n for n in gltf["nodes"] if n["name"] == node_name)
+        primitives = gltf["meshes"][node["mesh"]]["primitives"]
+        return [gltf["accessors"][p["attributes"]["POSITION"]] for p in primitives]
+
+    assert sum(a["count"] for a in positions("Ceiling_bad")) == 4  # schlichte Deckenfläche
+    assert sum(a["count"] for a in positions("Ceiling_wohnen")) > 16  # Platte mit Öffnung
+    # glTF: y nach oben – letzte Stufe auf Geschosshöhe 2,75 m
+    top = max(a["max"][1] for a in positions("Stufe_treppe_15"))
+    assert top == pytest.approx(2.75, abs=0.001)
     assert result.fbx.read_bytes().startswith(b"Kaydara FBX Binary")

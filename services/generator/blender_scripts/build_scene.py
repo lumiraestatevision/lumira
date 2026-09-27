@@ -13,11 +13,13 @@ Umfang:
   Fliesen im LV-Format mit Fuge, Putz mit feiner Struktur, Teppich – erzeugt mit numpy
 - Türen: Zarge + geöffnetes Türblatt (begehbar); Fenster: Rahmen, Pfosten, Glas
 - Wandkronen dunkel wie im Architekturmodell
-- Decken + Deckenleuchte je Raum (Materialien „Decke“/„Leuchte“ – im Viewer ausblendbar)
+- Decken + Deckenleuchte je Raum (Materialien „Decke“/„Leuchte“ – im Viewer ausblendbar);
+  über Treppen eine Deckenplatte mit Öffnung
+- Treppen: massive Stufen (Auftritt im Belag laut LV, Setzstufen weiß) bis zum oberen Geschoss
 - Einrichtung aus ``fixtures`` (lumira_generator.logic.furnish): Küche und Sanitär fest,
   lose Möbel mit Materialnamen „Moebel: …“ (der Viewer blendet sie auf Knopfdruck aus);
   Pflanze als Modell (Poly Haven, CC0), alles andere modern und schlicht selbst gebaut
-STUB: keine Lichtberechnung (Baking), Treppen, Texturen auf Möbeln – folgen.
+STUB: keine Lichtberechnung (Baking), Geländer, Texturen auf Möbeln – folgen.
 """
 
 import argparse
@@ -262,7 +264,7 @@ def surface_material(surface):
         )
         _normal_node(mat, bsdf, normal, strength=0.6)
     else:
-        mat = _principled(name, hex_to_rgba(color), 0.7)[0]
+        mat = _principled(name, hex_to_rgba(color), surface.get("roughness", 0.7))[0]
     _materials[key] = mat
     return mat
 
@@ -532,23 +534,48 @@ def emissive_material(name, hex_color, strength):
     return _materials[key]
 
 
-def _room_centre(polygon_m):
-    """Mittelpunkt für die Deckenleuchte – bei L-förmigen Räumen der Mittelpunkt des Umrisses,
-    falls der Schwerpunkt außerhalb liegt."""
+def _inside(point, polygon):
+    x, y = point
+    inside = False
+    for (x1, y1), (x2, y2) in zip(polygon, polygon[1:] + polygon[:1], strict=True):
+        if (y1 > y) != (y2 > y) and x < x1 + (y - y1) * (x2 - x1) / (y2 - y1):
+            inside = not inside
+    return inside
+
+
+def _room_centre(polygon_m, holes_m=()):
+    """Punkt für die Deckenleuchte: Schwerpunkt, bei L-Formen die Mitte des Umrisses. Liegt er
+    in einer Deckenöffnung (Treppe), der nächste Rasterpunkt im Raum außerhalb davon."""
     xs = [x for x, _ in polygon_m]
     ys = [y for _, y in polygon_m]
     cx, cy = sum(xs) / len(xs), sum(ys) / len(ys)
-    inside = False
-    for (x1, y1), (x2, y2) in zip(polygon_m, polygon_m[1:] + polygon_m[:1], strict=True):
-        if (y1 > cy) != (y2 > cy) and cx < x1 + (cy - y1) * (x2 - x1) / (y2 - y1):
-            inside = not inside
-    return (cx, cy) if inside else ((min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2)
+    if not _inside((cx, cy), polygon_m):
+        cx, cy = (min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2
+
+    def usable(point):
+        return _inside(point, polygon_m) and not any(_inside(point, h) for h in holes_m)
+
+    if usable((cx, cy)):
+        return cx, cy
+    grid = [
+        (min(xs) + i * 0.1, min(ys) + j * 0.1)
+        for i in range(int((max(xs) - min(xs)) / 0.1) + 1)
+        for j in range(int((max(ys) - min(ys)) / 0.1) + 1)
+    ]
+    spots = [p for p in grid if usable(p)]
+    return min(spots, key=lambda p: math.hypot(p[0] - cx, p[1] - cy)) if spots else (cx, cy)
 
 
-def build_ceiling(room, height):
-    """Decke (nach unten gerichtet) und eine Deckenleuchte je Raum. Im Viewer werden Decke und
-    Leuchte in der Draufsicht ausgeblendet (Materialnamen „Decke“, „Leuchte“)."""
-    polygon = [(x * MM, y * MM) for x, y in room["polygon"]]
+def _overlaps_bbox(a, b):
+    return not (
+        max(x for x, _ in a) <= min(x for x, _ in b)
+        or max(x for x, _ in b) <= min(x for x, _ in a)
+        or max(y for _, y in a) <= min(y for _, y in b)
+        or max(y for _, y in b) <= min(y for _, y in a)
+    )
+
+
+def _flat_ceiling(room, polygon, height):
     mesh = bpy.data.meshes.new(f"Ceiling_{room['id']}")
     bm = bmesh.new()
     face = bm.faces.new([bm.verts.new((x, y, height)) for x, y in polygon])
@@ -558,9 +585,42 @@ def build_ceiling(room, height):
     bm.free()
     obj = bpy.data.objects.new(f"Ceiling_{room['id']}", mesh)
     bpy.context.scene.collection.objects.link(obj)
-    mesh.materials.append(material("Decke", CEILING_COLOR, roughness=0.95))
+    return obj
 
-    cx, cy = _room_centre(polygon)
+
+def _slab_with_holes(room, height, slab, holes):
+    """Geschossdecke als Platte mit Treppenöffnung – Blick nach oben zeigt die Deckenkante."""
+    obj = prism(f"Ceiling_{room['id']}", room["polygon"], slab)
+    obj.location.z = height
+    cutters = []
+    for n, hole in enumerate(holes):
+        cutter = prism(f"Cut_{room['id']}_{n}", hole, slab + 0.1)
+        cutter.location.z = height - 0.05
+        modifier = obj.modifiers.new(name=f"hole_{n}", type="BOOLEAN")
+        modifier.operation = "DIFFERENCE"
+        modifier.object = cutter
+        cutters.append(cutter)
+    bake_modifiers(obj)
+    for cutter in cutters:
+        bpy.data.objects.remove(cutter, do_unlink=True)
+    apply_transform(obj)
+    return obj
+
+
+def build_ceiling(room, height, holes=(), slab=0.0):
+    """Decke (nach unten gerichtet) und eine Deckenleuchte je Raum. Über Treppen eine Platte mit
+    Öffnung (``holes``: Umrisse in mm, ``slab``: Deckenstärke in m). Im Viewer werden Decke und
+    Leuchte in der Draufsicht ausgeblendet (Materialnamen „Decke“, „Leuchte“)."""
+    polygon = [(x * MM, y * MM) for x, y in room["polygon"]]
+    own_holes = [h for h in holes if _overlaps_bbox(h, room["polygon"])]
+    if own_holes and slab > 0:
+        obj = _slab_with_holes(room, height, slab, own_holes)
+    else:
+        obj = _flat_ceiling(room, polygon, height)
+    obj.data.materials.append(material("Decke", CEILING_COLOR, roughness=0.95))
+
+    holes_m = [[(x * MM, y * MM) for x, y in h] for h in own_holes]
+    cx, cy = _room_centre(polygon, holes_m)
     lamp = Builder()
     lamp.cylinder(0.18, 0.04, (0, 0, height - 0.02), emissive_material("Leuchte", LAMP_COLOR, 4.0))
     lamp.finish(f"Leuchte_{room['id']}", cx, cy, math.pi / 2)
@@ -570,6 +630,27 @@ def build_ceiling(room, height):
     light.data.shadow_soft_size = 0.2
     light.location = (cx, cy, height - 0.25)
     bpy.context.scene.collection.objects.link(light)
+
+
+# ------------------------------------------------------------------ Treppen
+STAIR_SIDE_COLOR = "#F2F1EC"
+
+
+def build_stair(stair):
+    """Massive Stufenblöcke vom Boden bis zur Stufenoberkante: Auftritt im Belag, Setzstufen und
+    Seiten weiß. Die letzte Fläche (Austritt) liegt auf Höhe des oberen Geschosses."""
+    tread = stair["tread"]
+    top_mat = surface_material(tread)
+    side_mat = material("Treppe", STAIR_SIDE_COLOR, roughness=0.5)
+    for k, step in enumerate(stair["steps"]):
+        obj = prism(f"Stufe_{stair['id']}_{k:02d}", step["polygon"], step["top"] * MM)
+        box_uv(obj, uv_size_m(tread))
+        mesh = obj.data
+        mesh.materials.append(top_mat)
+        mesh.materials.append(side_mat)
+        for polygon in mesh.polygons:
+            polygon.material_index = 0 if polygon.normal.z > 0.99 else 1
+    return len(stair["steps"])
 
 
 # ------------------------------------------------------------------ Einrichtung
@@ -936,9 +1017,13 @@ def main():
 
     openings = sum(build_wall(w, scene_spec) for w in scene_spec["walls"])
     ceiling = max((w["height"] for w in scene_spec["walls"]), default=2500.0) * MM
+    stairs = scene_spec.get("stairs", [])
+    steps = sum(build_stair(stair) for stair in stairs)
+    holes = [stair["outline"] for stair in stairs]
+    storey = max((stair["floor_to_floor"] * MM for stair in stairs), default=ceiling)
     for room in scene_spec["rooms"]:
         build_floor(room)
-        build_ceiling(room, ceiling)
+        build_ceiling(room, ceiling, holes, slab=max(storey - ceiling, 0.0))
     fixtures = scene_spec.get("fixtures", [])
     for fixture in fixtures:
         build_fixture(fixture)
@@ -965,6 +1050,8 @@ def main():
         "walls": len(scene_spec["walls"]),
         "rooms": len(scene_spec["rooms"]),
         "openings": openings,
+        "stairs": len(stairs),
+        "steps": steps,
         "fixtures": len(fixtures),
         "loose": sum(1 for f in fixtures if f["loose"]),
         "objects": len(bpy.data.objects),
