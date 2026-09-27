@@ -370,7 +370,11 @@ services:
       SERVICE_NAME: generator
       PORT: "8005"
       BLENDER_BIN: /opt/blender/blender
-      BLENDER_TIMEOUT_S: ${BLENDER_TIMEOUT_S:-600}
+      BLENDER_TIMEOUT_S: ${BLENDER_TIMEOUT_S:-1200}
+      # Licht einbrennen: Samples auf CPU bzw. GPU (docker-compose.gpu.yml), 0 = aus
+      BAKE_SAMPLES: ${BAKE_SAMPLES:-64}
+      BAKE_SAMPLES_GPU: ${BAKE_SAMPLES_GPU:-512}
+      LIGHTMAP_PX: ${LIGHTMAP_PX:-2048}
       TEXTURE_DIR: /app/assets/textures  # make assets; fehlt der Ordner → Materialfarben
       MODEL_DIR: /app/assets/models  # make assets; fehlt der Ordner → einfache Ersatzformen
     ports:

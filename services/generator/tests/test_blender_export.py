@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 from lumira_generator.config import GeneratorSettings
-from lumira_generator.logic.blender_runner import run_blender
+from lumira_generator.logic.blender_runner import BakeOptions, run_blender
 from lumira_generator.logic.scene import build_scene
 from lumira_shared.models import (
     BLVResult,
@@ -200,6 +200,7 @@ async def test_real_blender_exports_fbx_and_gltf(tmp_path: Path) -> None:
         workdir=tmp_path,
         timeout_s=300,
         texture_dir=_fake_textures(tmp_path),
+        bake=BakeOptions(samples=4, samples_gpu=4, lightmap_px=256),
     )
 
     assert result.stats["walls"] == 7
@@ -235,4 +236,23 @@ async def test_real_blender_exports_fbx_and_gltf(tmp_path: Path) -> None:
     # glTF: y nach oben – letzte Stufe auf Geschosshöhe 2,75 m
     top = max(a["max"][1] for a in positions("Stufe_treppe_15"))
     assert top == pytest.approx(2.75, abs=0.001)
+
+    # Eingebranntes Licht: eine Lightmap als Occlusion auf der zweiten UV-Map der Raumhülle,
+    # lose Möbel und Türen ohne (sie werden im Viewer normal beleuchtet)
+    lightmap = result.stats["lightmap"]
+    assert lightmap["px"] == 256
+    assert lightmap["receivers"] >= 7 + 2 + 2 + 16  # Wände, Böden, Decken, Stufen
+    extras = gltf["scenes"][0]["extras"]["lumira_lightmap"]
+    assert extras["encoding"] == "reinhard"
+    assert extras["key"] > 0
+    by_name = {m["name"]: m for m in gltf["materials"]}
+    for name in ("Eichenparkett", "Bodenfliesen", "Decke", "Treppe", "Wandkrone"):
+        occlusion = by_name[name]["occlusionTexture"]
+        assert occlusion["texCoord"] == 1
+        assert gltf["images"][gltf["textures"][occlusion["index"]]["source"]]["name"] == "Lightmap"
+    assert "occlusionTexture" not in by_name["Tür"]
+    assert "occlusionTexture" not in by_name["Glas"]
+    floor = next(n for n in gltf["nodes"] if n["name"].startswith("Floor_wohnen"))
+    attributes = gltf["meshes"][floor["mesh"]]["primitives"][0]["attributes"]
+    assert {"TEXCOORD_0", "TEXCOORD_1"} <= set(attributes)
     assert result.fbx.read_bytes().startswith(b"Kaydara FBX Binary")

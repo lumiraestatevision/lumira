@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from lumira_generator.logic.blender_runner import BlenderError, run_blender
+from lumira_generator.logic.blender_runner import BakeOptions, BlenderError, run_blender
 from lumira_generator.logic.scene import FALLBACK_FLOOR, build_scene
 from lumira_shared import NonRetryableError
 from lumira_shared.models import (
@@ -246,6 +246,7 @@ def _fake_blender(tmp_path: Path, body: str) -> str:
     exe = tmp_path / "fake-blender"
     exe.write_text(
         "#!/usr/bin/env bash\n"
+        'echo "$@" > "$(dirname "$0")/args.txt"\n'
         'while [ "$1" != "--" ]; do shift; done; shift\n'
         'while [ $# -gt 0 ]; do case "$1" in --fbx) FBX=$2;; --glb) GLB=$2;; esac; shift 2; done\n'
         + body
@@ -265,6 +266,32 @@ async def test_runner_collects_outputs(tmp_path: Path) -> None:
     )
     assert result.glb.read_text().strip() == "glb"
     assert result.stats == {"walls": 1}
+
+
+@pytest.mark.parametrize(
+    ("bake", "expected"),
+    [
+        (None, ""),
+        (BakeOptions(samples=0, samples_gpu=512, lightmap_px=2048), ""),
+        (
+            BakeOptions(samples=64, samples_gpu=512, lightmap_px=2048),
+            "--bake-samples 64 --bake-samples-gpu 512 --lightmap-px 2048",
+        ),
+    ],
+)
+async def test_runner_passes_bake_options(
+    tmp_path: Path, bake: BakeOptions | None, expected: str
+) -> None:
+    """Licht einbrennen nur mit Samples > 0 – sonst baut Blender ohne Lightmap."""
+    blender = _fake_blender(tmp_path, 'echo fbx > "$FBX"; echo glb > "$GLB"\n')
+    work = tmp_path / "work"
+    work.mkdir()
+
+    await run_blender({}, blender_bin=blender, script=SCRIPT, workdir=work, timeout_s=10, bake=bake)
+
+    args = (tmp_path / "args.txt").read_text()
+    assert ("--bake-samples" in args) is bool(expected)
+    assert expected in args
 
 
 async def test_runner_reports_blender_errors(tmp_path: Path) -> None:

@@ -32,6 +32,9 @@ jobs:
       COMPOSE_PROFILES: cpu
       PIPELINE_VR_ENABLED: "false"
       LOG_JSON: "true"
+      # Licht einbrennen nur angetestet – volle Qualität kostet auf dem Runner Minuten je Modell
+      BAKE_SAMPLES: "4"
+      LIGHTMAP_PX: "256"
     steps:
       - name: Speicherplatz freiräumen (Images ≈ 8 GB)
         run: |

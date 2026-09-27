@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import cast
 
 from lumira_generator.config import GeneratorSettings
-from lumira_generator.logic.blender_runner import run_blender
+from lumira_generator.logic.blender_runner import BakeOptions, run_blender
 from lumira_generator.logic.scene import build_scene
 from lumira_shared import Artifact, Event, EventType, ServiceContext, artifact_key
 from lumira_shared.models import BLVResult, FloorPlan
@@ -31,6 +31,11 @@ async def handle_blv_processed(event: Event, ctx: ServiceContext) -> Event:
             timeout_s=settings.blender_timeout_s,
             texture_dir=settings.texture_dir,
             model_dir=settings.model_dir,
+            bake=BakeOptions(
+                samples=settings.bake_samples,
+                samples_gpu=settings.bake_samples_gpu,
+                lightmap_px=settings.lightmap_px,
+            ),
         )
         fbx_key = await ctx.storage.upload_file(
             artifact_key(event.project_id, STEP, "model.fbx"), result.fbx

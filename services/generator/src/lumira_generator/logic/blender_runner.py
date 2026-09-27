@@ -26,6 +26,15 @@ class BlenderError(RuntimeError):
 
 
 @dataclass(frozen=True, slots=True)
+class BakeOptions:
+    """Licht einbrennen: Samples je nach Gerät (Blender wählt die GPU, wenn vorhanden)."""
+
+    samples: int
+    samples_gpu: int
+    lightmap_px: int
+
+
+@dataclass(frozen=True, slots=True)
 class BlenderOutput:
     fbx: Path
     glb: Path
@@ -47,6 +56,7 @@ async def run_blender(
     timeout_s: float,
     texture_dir: Path | None = None,
     model_dir: Path | None = None,
+    bake: BakeOptions | None = None,
 ) -> BlenderOutput:
     spec = workdir / "scene.json"
     fbx, glb = workdir / "model.fbx", workdir / "model.glb"
@@ -72,6 +82,15 @@ async def run_blender(
         cmd += ["--textures", str(texture_dir)]
     if model_dir is not None:  # fehlender Ordner → einfache Ersatzformen
         cmd += ["--models", str(model_dir)]
+    if bake is not None and bake.samples > 0:
+        cmd += [
+            "--bake-samples",
+            str(bake.samples),
+            "--bake-samples-gpu",
+            str(bake.samples_gpu),
+            "--lightmap-px",
+            str(bake.lightmap_px),
+        ]
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,

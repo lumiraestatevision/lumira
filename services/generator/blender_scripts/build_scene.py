@@ -4,7 +4,8 @@ Läuft INNERHALB von Blender (eigenes Python, bpy eingebaut) – nicht mit dem S
 
     blender --background --factory-startup --python-exit-code 1 \\
         --python build_scene.py -- --spec scene.json --fbx model.fbx --glb model.glb \\
-        [--textures /pfad/zu/assets/textures]
+        [--textures /pfad/zu/assets/textures] [--models …]
+        [--bake-samples 64 --bake-samples-gpu 512 --lightmap-px 2048]
 
 Umfang:
 - Wände aus exaktem Grundriss (CAD-Fläche, als Prisma) oder als Quader aus Achse und Dicke;
@@ -19,7 +20,10 @@ Umfang:
 - Einrichtung aus ``fixtures`` (lumira_generator.logic.furnish): Küche und Sanitär fest,
   lose Möbel mit Materialnamen „Moebel: …“ (der Viewer blendet sie auf Knopfdruck aus);
   Pflanze als Modell (Poly Haven, CC0), alles andere modern und schlicht selbst gebaut
-STUB: keine Lichtberechnung (Baking), Geländer, Texturen auf Möbeln – folgen.
+- Licht eingebrannt (Cycles): Tageslicht durch die Fenster + Deckenleuchten mit indirektem
+  Licht in einer Lightmap für Wände, Böden, Decken, Treppen (glTF: Occlusion auf TEXCOORD_1,
+  Kodierung in scene.extras.lumira_lightmap)
+STUB: Geländer, Texturen auf Möbeln – folgen.
 """
 
 import argparse
@@ -27,6 +31,7 @@ import json
 import math
 import os
 import sys
+import time
 
 import bmesh
 import bpy
@@ -41,6 +46,8 @@ DOOR_LEAF_MM = 40.0
 DOOR_FRAME_MM = 30.0
 WINDOW_PROFILE_MM = 70.0
 WINDOW_DEPTH_MM = 80.0
+BASE_UV = "UVMap"  # Materialtexturen (glTF TEXCOORD_0)
+LIGHTMAP_UV = "Lightmap"  # eingebranntes Licht (glTF TEXCOORD_1)
 
 _materials = {}
 _images = {}
@@ -56,6 +63,9 @@ def parse_args():
     parser.add_argument("--glb", required=True)
     parser.add_argument("--textures", default=None)
     parser.add_argument("--models", default=None)
+    parser.add_argument("--bake-samples", type=int, default=0, help="CPU; 0 = kein Einbrennen")
+    parser.add_argument("--bake-samples-gpu", type=int, default=None, help="mit NVIDIA-GPU")
+    parser.add_argument("--lightmap-px", type=int, default=2048)
     return parser.parse_args(argv)
 
 
@@ -178,6 +188,8 @@ def texture_images(texture_id):
                     image.colorspace_settings.name = "Non-Color"
                 if max(image.size) > EXPORT_TEXTURE_PX:  # Browser/VR: 1K reicht, spart ~75 %
                     image.scale(EXPORT_TEXTURE_PX, EXPORT_TEXTURE_PX)
+                    image.pack()  # sonst lädt Cycles beim Einbrennen wieder das 2K-Original
+
                 loaded[kind] = image
             result = (loaded["diff"], loaded.get("gl"), loaded.get("rough"))
     _images[texture_id] = result
@@ -195,9 +207,17 @@ def _principled(name, rgba, roughness):
     return mat, bsdf
 
 
-def _image_node(mat, image):
+def _uv_node(mat, uv_map):
+    node = mat.node_tree.nodes.new("ShaderNodeUVMap")
+    node.uv_map = uv_map
+    return node
+
+
+def _image_node(mat, image, uv_map=BASE_UV):
+    """Bildtextur mit ausdrücklicher UV-Map – eingebrannte Flächen haben eine zweite."""
     node = mat.node_tree.nodes.new("ShaderNodeTexImage")
     node.image = image
+    mat.node_tree.links.new(_uv_node(mat, uv_map).outputs["UV"], node.inputs["Vector"])
     return node
 
 
@@ -207,6 +227,7 @@ def _normal_node(mat, bsdf, image, strength=1.0):
     links = mat.node_tree.links
     tex = _image_node(mat, image)
     normal = mat.node_tree.nodes.new("ShaderNodeNormalMap")
+    normal.uv_map = BASE_UV
     normal.inputs["Strength"].default_value = strength
     links.new(tex.outputs["Color"], normal.inputs["Color"])
     links.new(normal.outputs["Normal"], bsdf.inputs["Normal"])
@@ -315,7 +336,7 @@ def apply_transform(obj):
 def box_uv(obj, size_xy, rotate=False):
     """Würfelprojektion in Weltmaßstab: jede Fläche projiziert auf ihre Hauptachse."""
     mesh = obj.data
-    layer = mesh.uv_layers.new(name="UVMap") if not mesh.uv_layers else mesh.uv_layers[0]
+    layer = mesh.uv_layers.new(name=BASE_UV) if not mesh.uv_layers else mesh.uv_layers[0]
     su, sv = size_xy
     for polygon in mesh.polygons:
         axis = max(range(3), key=lambda i: abs(polygon.normal[i]))
@@ -522,6 +543,7 @@ def build_floor(room):
 # ------------------------------------------------------------------ Decken und Licht
 CEILING_COLOR = "#F7F6F3"
 LAMP_COLOR = "#FFF4E2"
+LAMP_WATT = 60.0
 
 
 def emissive_material(name, hex_color, strength):
@@ -624,11 +646,14 @@ def build_ceiling(room, height, holes=(), slab=0.0):
     lamp = Builder()
     lamp.cylinder(0.18, 0.04, (0, 0, height - 0.02), emissive_material("Leuchte", LAMP_COLOR, 4.0))
     lamp.finish(f"Leuchte_{room['id']}", cx, cy, math.pi / 2)
-    # Echte Lichtquelle für das spätere Einbrennen (wird nicht ins GLB exportiert)
-    light = bpy.data.objects.new(f"Licht_{room['id']}", bpy.data.lights.new(room["id"], "POINT"))
-    light.data.energy = 120.0
-    light.data.shadow_soft_size = 0.2
-    light.location = (cx, cy, height - 0.25)
+    # Echte Lichtquelle zum Einbrennen (wird nicht ins GLB exportiert): runde Flächenleuchte,
+    # strahlt wie ein LED-Panel nach unten – kein Lichtfleck an der Decke darüber.
+    light = bpy.data.objects.new(f"Licht_{room['id']}", bpy.data.lights.new(room["id"], "AREA"))
+    light.data.shape = "DISK"
+    light.data.size = 0.34
+    light.data.energy = LAMP_WATT
+    light.data.color = (1.0, 0.93, 0.84)  # warmweiß
+    light.location = (cx, cy, height - 0.045)
     bpy.context.scene.collection.objects.link(light)
 
 
@@ -1001,6 +1026,313 @@ def build_fixture(fixture):
     return obj
 
 
+# ------------------------------------------------------------------ Licht einbrennen
+# Empfänger: feste Raumhülle. Lose Möbel werfen keinen Schatten (sonst blieben beim Ausblenden
+# „Geisterschatten“ zurück), Glas lässt das Licht durch.
+RECEIVER_PREFIXES = ("Wall_", "Floor_", "Ceiling_", "Stufe_")
+SHADOWLESS_PREFIXES = ("Moebel_", "Glas_")
+SKY_COLOR = (0.82, 0.88, 1.0)  # leicht bläulich bedeckt – neutral genug für helle Fassaden
+SKY_STRENGTH = 1.0
+SUN_STRENGTH = 2.5
+SUN_COLOR = (1.0, 0.95, 0.88)
+LIGHT_SATURATION = 0.7
+
+
+def _receivers():
+    return [
+        obj
+        for obj in bpy.context.scene.objects
+        if obj.type == "MESH" and obj.name.startswith(RECEIVER_PREFIXES)
+    ]
+
+
+def _drop_bottom_faces(obj):
+    """Unterseiten auf dem Boden sieht niemand – sie kosten nur Platz in der Lightmap."""
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    hidden = [f for f in bm.faces if f.normal.z < -0.99 and all(v.co.z < 0.005 for v in f.verts)]
+    if hidden and len(hidden) < len(bm.faces):
+        bmesh.ops.delete(bm, geom=hidden, context="FACES")
+        bm.to_mesh(obj.data)
+    bm.free()
+
+
+def lightmap_uvs(receivers):
+    """Zweite UV-Map ohne Überlappung über alle Empfänger (ein gemeinsamer Atlas)."""
+    for obj in receivers:
+        _drop_bottom_faces(obj)
+        mesh = obj.data
+        if not mesh.uv_layers:
+            mesh.uv_layers.new(name=BASE_UV)
+        mesh.uv_layers[0].active_render = True
+        mesh.uv_layers.active = mesh.uv_layers.new(name=LIGHTMAP_UV)
+    view_layer = bpy.context.view_layer
+    for obj in view_layer.objects:
+        obj.select_set(obj in receivers)
+    view_layer.objects.active = receivers[0]
+    bpy.ops.object.mode_set(mode="EDIT")
+    bpy.ops.mesh.select_all(action="SELECT")
+    bpy.ops.uv.smart_project(
+        angle_limit=math.radians(66.0),
+        island_margin=0.003,
+        area_weight=0.0,
+        correct_aspect=True,
+        scale_to_bounds=False,
+    )
+    # dichter packen (Smart UV lässt viel frei) – gleicher Maßstab für alle Inseln
+    bpy.ops.uv.select_all(action="SELECT")
+    bpy.ops.uv.pack_islands(rotate=True, margin_method="FRACTION", margin=0.004)
+    bpy.ops.object.mode_set(mode="OBJECT")
+
+
+def _joined_copy(objects):
+    copies = []
+    for obj in objects:
+        copy = obj.copy()
+        copy.data = obj.data.copy()
+        bpy.context.scene.collection.objects.link(copy)
+        copies.append(copy)
+    view_layer = bpy.context.view_layer
+    for obj in view_layer.objects:
+        obj.select_set(obj in copies)
+    view_layer.objects.active = copies[0]
+    bpy.ops.object.join()
+    return view_layer.objects.active
+
+
+def _use_gpu():
+    """OptiX/CUDA, falls der Container eine GPU sieht – sonst CPU."""
+    prefs = bpy.context.preferences.addons["cycles"].preferences
+    for backend in ("OPTIX", "CUDA"):
+        try:
+            prefs.compute_device_type = backend
+        except TypeError:
+            continue
+        prefs.get_devices()
+        gpus = [d for d in prefs.devices if d.type == backend]
+        if gpus:
+            for device in prefs.devices:
+                device.use = device.type == backend
+            bpy.context.scene.cycles.device = "GPU"
+            return backend
+    bpy.context.scene.cycles.device = "CPU"
+    return "CPU"
+
+
+def _daylight():
+    scene = bpy.context.scene
+    world = bpy.data.worlds.new("Himmel")
+    world.use_nodes = True
+    background = world.node_tree.nodes["Background"]
+    background.inputs["Color"].default_value = (*SKY_COLOR, 1.0)
+    background.inputs["Strength"].default_value = SKY_STRENGTH
+    scene.world = world
+    sun = bpy.data.objects.new("Sonne", bpy.data.lights.new("Sonne", "SUN"))
+    sun.data.energy = SUN_STRENGTH
+    sun.data.color = SUN_COLOR
+    sun.data.angle = math.radians(1.5)
+    sun.rotation_euler = (math.radians(55), 0.0, math.radians(35))
+    scene.collection.objects.link(sun)
+
+
+def _receiver_materials(receivers):
+    """Materialien der Empfänger. Nutzt ein anderes Objekt dasselbe Material, bekommt es eine
+    Kopie ohne Lightmap (dessen UVs liegen nicht im Atlas)."""
+    materials = {s.material for o in receivers for s in o.material_slots if s.material}
+    copies = {}
+    for obj in bpy.context.scene.objects:
+        if obj.type != "MESH" or obj in receivers:
+            continue
+        for slot in obj.material_slots:
+            if slot.material in materials:
+                if slot.material not in copies:
+                    copies[slot.material] = slot.material.copy()
+                slot.material = copies[slot.material]
+    return materials
+
+
+def _denoise(image, size):
+    """OIDN über den Compositor (Workbench rendert die Szene nur pro forma)."""
+    scene = bpy.context.scene
+    scene.use_nodes = True
+    tree = scene.node_tree
+    tree.nodes.clear()
+    source = tree.nodes.new("CompositorNodeImage")
+    source.image = image
+    denoise = tree.nodes.new("CompositorNodeDenoise")
+    denoise.use_hdr = True
+    denoise.prefilter = "ACCURATE"
+    output = tree.nodes.new("CompositorNodeComposite")
+    tree.links.new(source.outputs["Image"], denoise.inputs["Image"])
+    tree.links.new(denoise.outputs["Image"], output.inputs["Image"])
+    camera = bpy.data.objects.new("Bake_Kamera", bpy.data.cameras.new("Bake_Kamera"))
+    scene.collection.objects.link(camera)
+    scene.camera = camera
+    engine = scene.render.engine
+    scene.render.engine = "BLENDER_WORKBENCH"
+    scene.render.resolution_x = scene.render.resolution_y = size
+    scene.render.resolution_percentage = 100
+    scene.render.image_settings.file_format = "OPEN_EXR"
+    scene.render.image_settings.color_depth = "32"
+    path = os.path.join(bpy.app.tempdir or "/tmp", "lightmap_denoised.exr")
+    scene.render.filepath = path
+    bpy.ops.render.render(write_still=True)
+    scene.render.engine = engine
+    scene.use_nodes = False
+    bpy.data.objects.remove(camera, do_unlink=True)
+    result = bpy.data.images.load(path)
+    pixels = np.empty(size * size * 4, dtype=np.float32)
+    result.pixels.foreach_get(pixels)
+    bpy.data.images.remove(result)
+    return pixels.reshape(size, size, 4)
+
+
+def _floor_luminance(pixels, size):
+    """Mittlere Helligkeit der Böden – Bezugswert für die Tonkurve (außen ist es viel heller)."""
+    samples = []
+    weights = ((1 / 3, 1 / 3, 1 / 3), (0.6, 0.2, 0.2), (0.2, 0.6, 0.2), (0.2, 0.2, 0.6))
+    for obj in bpy.context.scene.objects:
+        if not obj.name.startswith("Floor_"):
+            continue
+        mesh = obj.data
+        layer = mesh.uv_layers[LIGHTMAP_UV].data
+        mesh.calc_loop_triangles()
+        for tri in mesh.loop_triangles:
+            uvs = [layer[i].uv for i in tri.loops]
+            for w in weights:
+                u = sum(wi * uv.x for wi, uv in zip(w, uvs, strict=True))
+                v = sum(wi * uv.y for wi, uv in zip(w, uvs, strict=True))
+                x, y = min(int(u * size), size - 1), min(int(v * size), size - 1)
+                samples.append(float(pixels[y, x, :3] @ np.array([0.2126, 0.7152, 0.0722])))
+    return float(np.median(samples)) if samples else 1.0
+
+
+def _gltf_output_group():
+    """Knotengruppe, die der glTF-Export als Ziel für die Occlusion-Textur erkennt."""
+    group = bpy.data.node_groups.get("glTF Material Output")
+    if group is None:
+        group = bpy.data.node_groups.new("glTF Material Output", "ShaderNodeTree")
+        group.interface.new_socket("Occlusion", in_out="INPUT", socket_type="NodeSocketFloat")
+    return group
+
+
+def bake_lighting(size, samples, samples_gpu=None):
+    """Tageslicht (Himmel + Sonne durch die Fenster) und Deckenleuchten mit indirektem Licht
+    in eine gemeinsame Lightmap brennen. Gespeichert als glTF-Occlusion-Textur auf TEXCOORD_1:
+    Standard-Viewer zeigen damit Licht und Schatten, der begehbare Viewer nutzt sie als
+    Lightmap. Kodierung: L_enc = L / (L + k), k = mittlere Bodenhelligkeit (→ 0,5)."""
+    started = time.time()
+    scene = bpy.context.scene
+    receivers = _receivers()
+    if not receivers:
+        return None
+    lightmap_uvs(receivers)
+    uv_s = time.time() - started
+    materials = _receiver_materials(receivers)
+    _daylight()
+
+    scene.render.engine = "CYCLES"
+    device = _use_gpu()
+    fallback_samples = samples
+    if device != "CPU" and samples_gpu:
+        samples = samples_gpu
+    cycles = scene.cycles
+    cycles.samples = samples
+    cycles.max_bounces = 6
+    cycles.diffuse_bounces = 3
+    cycles.glossy_bounces = 1
+    cycles.transparent_max_bounces = 8
+    cycles.caustics_reflective = cycles.caustics_refractive = False
+    cycles.sample_clamp_indirect = 10.0
+    scene.render.bake.margin = 6
+    scene.render.bake.margin_type = "EXTEND"
+
+    hidden = []
+    for obj in scene.objects:
+        if obj.name.startswith(SHADOWLESS_PREFIXES):
+            obj.visible_shadow = False
+            if obj.name.startswith("Moebel_") and not obj.hide_render:
+                obj.hide_render = True  # auch kein indirektes Licht von losen Möbeln
+                hidden.append(obj)
+
+    raw = bpy.data.images.new("Lightmap_roh", size, size, alpha=False, float_buffer=True)
+    raw.colorspace_settings.name = "Non-Color"
+    bake_nodes = []
+    normal_links = []
+    for mat in materials:
+        node = _image_node(mat, raw, uv_map=LIGHTMAP_UV)
+        mat.node_tree.nodes.active = node
+        bake_nodes.append(node)
+        # Feine Normal-Maps (Putz, Fugen) gehören nicht in eine 3-cm-Lightmap – eingebrannt
+        # erscheinen sie als Flecken. Beim Backen abklemmen, danach wieder anschließen.
+        for link in list(mat.node_tree.links):
+            if link.to_socket.name == "Normal" and link.to_node.type == "BSDF_PRINCIPLED":
+                normal_links.append((mat.node_tree, link.from_socket, link.to_socket))
+                mat.node_tree.links.remove(link)
+    # Cycles backt jedes ausgewählte Objekt mit eigener Szenenvorbereitung – bei 100+ Flächen
+    # kostet das mehr als das Licht selbst. Deshalb eine zusammengefügte Kopie backen (gleiche
+    # Lightmap-UVs, gleiche Materialien → schreibt in dasselbe Bild); die Originale bleiben.
+    proxy = _joined_copy(receivers)
+    for obj in receivers:
+        obj.hide_render = True
+    view_layer = bpy.context.view_layer
+    for obj in view_layer.objects:
+        obj.select_set(obj == proxy)
+    view_layer.objects.active = proxy
+    try:
+        bpy.ops.object.bake(type="DIFFUSE", pass_filter={"DIRECT", "INDIRECT"}, use_clear=True)
+    except RuntimeError as exc:
+        if device == "CPU":
+            raise
+        # GPU belegt (z. B. Ollama hält ein Sprachmodell im Grafikspeicher) → CPU
+        print(f"GPU-Einbrennen fehlgeschlagen ({exc}) – weiter auf der CPU", flush=True)
+        device, cycles.samples = "CPU", fallback_samples
+        scene.cycles.device = "CPU"
+        bpy.ops.object.bake(type="DIFFUSE", pass_filter={"DIRECT", "INDIRECT"}, use_clear=True)
+    baked_s = time.time() - started
+    bpy.data.objects.remove(proxy, do_unlink=True)
+    for obj in [*hidden, *receivers]:
+        obj.hide_render = False
+    for tree, from_socket, to_socket in normal_links:
+        tree.links.new(from_socket, to_socket)
+
+    pixels = _denoise(raw, size)
+    key = max(_floor_luminance(pixels, size), 1e-4)
+    rgb = np.clip(pixels[:, :, :3], 0.0, None)
+    luminance = rgb @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
+    # Farbstich durch Mehrfachreflexion (Holzboden → Decke) etwas dämpfen
+    rgb = luminance[:, :, None] + LIGHT_SATURATION * (rgb - luminance[:, :, None])
+    rgb = np.clip(rgb, 0.0, None)
+    encoded = np.clip(rgb / (luminance + key)[:, :, None], 0.0, 1.0)
+    lightmap = bpy.data.images.new("Lightmap", size, size, alpha=False)
+    lightmap.colorspace_settings.name = "Non-Color"
+    rgba = np.dstack((encoded, np.ones((size, size), dtype=np.float32))).astype(np.float32)
+    lightmap.pixels.foreach_set(rgba.ravel())
+    lightmap.pack()
+    bpy.data.images.remove(raw)
+
+    group = _gltf_output_group()
+    for node in bake_nodes:
+        tree = node.id_data
+        node.image = lightmap
+        split = tree.nodes.new("ShaderNodeSeparateColor")
+        output = tree.nodes.new("ShaderNodeGroup")
+        output.node_tree = group
+        tree.links.new(node.outputs["Color"], split.inputs["Color"])
+        tree.links.new(split.outputs["Red"], output.inputs["Occlusion"])
+    scene["lumira_lightmap"] = {"encoding": "reinhard", "key": key, "uv": 1}
+    return {
+        "px": size,
+        "samples": cycles.samples,
+        "device": device,
+        "receivers": len(receivers),
+        "uv_s": round(uv_s, 1),
+        "bake_s": round(baked_s - uv_s, 1),
+        "total_s": round(time.time() - started, 1),
+        "key": round(key, 4),
+    }
+
+
 def main():
     global TEXTURE_DIR, MODEL_DIR
     args = parse_args()
@@ -1029,6 +1361,9 @@ def main():
         build_fixture(fixture)
     if _plant.get("template") is not None and not _plant.get("used"):
         bpy.data.objects.remove(_plant["template"], do_unlink=True)
+    lightmap = None
+    if args.bake_samples > 0:
+        lightmap = bake_lighting(args.lightmap_px, args.bake_samples, args.bake_samples_gpu)
 
     bpy.ops.export_scene.fbx(
         filepath=args.fbx,
@@ -1043,6 +1378,7 @@ def main():
         export_apply=True,
         export_image_format="JPEG",
         export_jpeg_quality=85,
+        export_extras=True,  # u. a. Kodierung der Lightmap (scene.extras.lumira_lightmap)
     )
 
     textured = sorted(k for k, v in _images.items() if isinstance(k, str) and v)
@@ -1057,6 +1393,7 @@ def main():
         "objects": len(bpy.data.objects),
         "materials": len(bpy.data.materials),
         "textures": textured,
+        "lightmap": lightmap,
         "blender": bpy.app.version_string,
     }
     print("LUMIRA_RESULT " + json.dumps(stats), flush=True)

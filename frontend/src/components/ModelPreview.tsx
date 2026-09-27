@@ -12,10 +12,18 @@ interface ViewerMaterial {
     baseColorFactor: number[];
     setBaseColorFactor(color: number[]): void;
   };
+  occlusionTexture?: { texture: unknown };
 }
 interface ViewerElement extends HTMLElement {
   model?: { materials: ViewerMaterial[] };
+  exposure: number;
 }
+
+// Eingebranntes Licht (Lightmap als Occlusion-Textur) dunkelt die Umgebungsbeleuchtung ab –
+// mittlere Bodenhelligkeit ≈ 0,5. Mit höherer Belichtung bleiben Räume hell, behalten aber
+// Licht und Schatten.
+const EXPOSURE = 0.9;
+const EXPOSURE_BAKED = 1.35;
 
 // Materialnamen aus dem Generator (build_scene.py):
 //   „Moebel: …“  lose Möbel – per Knopf ein-/ausblendbar
@@ -73,6 +81,8 @@ export function ModelPreview({ src }: { src: string }) {
       element.addEventListener("load", () => {
         original.current = new Map();
         apply(furnitureOn.current);
+        const baked = (element.model?.materials ?? []).some((m) => m.occlusionTexture?.texture);
+        element.exposure = baked ? EXPOSURE_BAKED : EXPOSURE;
       });
     },
     [apply],
@@ -104,7 +114,7 @@ export function ModelPreview({ src }: { src: string }) {
         "camera-orbit": "15deg 50deg 70%",
         // Gerichtetes Studiolicht statt gleichmäßiger Ausleuchtung: Wände heben sich ab.
         "environment-image": "neutral",
-        exposure: "0.9",
+        exposure: String(EXPOSURE),
         "shadow-intensity": "1",
         "shadow-softness": "0.6",
         "interaction-prompt": "none",

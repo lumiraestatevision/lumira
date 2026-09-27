@@ -163,8 +163,11 @@ dafür fehlt bisher die Zielplattform.
   realer Größe, Fliesen im LV-Format, Putz), Türen (Zarge, geöffnetes Blatt), Fenster (Rahmen,
   Glas), Decken mit Leuchten, Küche und Sanitär laut LV, lose Möbel regelbasiert platziert
   (in der Vorschau per Knopf ausblendbar), Treppen als massive Stufen (Belag laut LV) mit
-  Deckenöffnung. Noch nicht: Licht (Baking), Geländer, Obergeschoss, begehbarer Viewer / WebXR
-  – als Nächstes geplant (Weg „Browser + WebXR“).
+  Deckenöffnung. Licht ist eingebrannt (Tageslicht durch die Fenster + Deckenleuchten mit
+  indirektem Licht, Lightmap für die Raumhülle): auf der CPU 64 Samples (~4 min), mit
+  NVIDIA-GPU 512 Samples (~1 min, `COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml`
+  in `.env`). Noch nicht: Geländer, Obergeschoss, begehbarer Viewer / WebXR – als Nächstes
+  geplant (Weg „Browser + WebXR“).
 - **Unreal Engine**: nur Stub (schreibt ein Manifest). Echter Betrieb später auf einem GPU-Server.
 - **DWG**: wird mit klarer Fehlermeldung abgelehnt – bitte als DXF exportieren.
 - **PDF-Maßstab**: aus dem Schriftfeld („Maßstab 1:100“), sonst 1:100 angenommen; geprüft und

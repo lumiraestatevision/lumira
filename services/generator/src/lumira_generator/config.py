@@ -18,3 +18,8 @@ class GeneratorSettings(BaseServiceSettings):
     texture_dir: Path | None = None
     # 3D-Modelle (Pflanze …). Fehlt der Ordner, baut Blender einfache Ersatzformen.
     model_dir: Path | None = None
+    # Licht einbrennen (Lightmap). 0 = aus. Die GPU schafft in gleicher Zeit ~20x mehr Samples;
+    # Blender nimmt sie, wenn der Container eine NVIDIA-GPU sieht (docker-compose.gpu.yml).
+    bake_samples: int = 64  # CPU: ~3–4 min für ein Doppelhaus
+    bake_samples_gpu: int = 512  # RTX 3060 Ti: ~1 min
+    lightmap_px: int = 2048  # ≈ 3 cm je Pixel für ein Doppelhaus
