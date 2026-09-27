@@ -166,8 +166,11 @@ dafür fehlt bisher die Zielplattform.
   Deckenöffnung. Licht ist eingebrannt (Tageslicht durch die Fenster + Deckenleuchten mit
   indirektem Licht, Lightmap für die Raumhülle): auf der CPU 64 Samples (~4 min), mit
   NVIDIA-GPU 512 Samples (~1 min, `COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml`
-  in `.env`). Noch nicht: Geländer, Obergeschoss, begehbarer Viewer / WebXR – als Nächstes
-  geplant (Weg „Browser + WebXR“).
+  in `.env`). Noch nicht: Geländer, Obergeschoss, Wechsel der Ausstattungsvarianten.
+- **Rundgang** („Rundgang starten“ beim Projekt): frei durchs Modell gehen – PC mit Maus und
+  W/A/S/D, Handy per Wischen, VR-Brille per WebXR (Teleport mit dem Abzug, linker Stick gehen,
+  rechter Stick drehen). Kollision mit Wänden und Möbeln, Treppen begehbar, eingebranntes Licht.
+  VR ist mangels Brille noch nicht auf echter Hardware getestet.
 - **Unreal Engine**: nur Stub (schreibt ein Manifest). Echter Betrieb später auf einem GPU-Server.
 - **DWG**: wird mit klarer Fehlermeldung abgelehnt – bitte als DXF exportieren.
 - **PDF-Maßstab**: aus dem Schriftfeld („Maßstab 1:100“), sonst 1:100 angenommen; geprüft und

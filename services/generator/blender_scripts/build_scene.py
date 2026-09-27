@@ -523,7 +523,8 @@ def build_floor(room):
     bm = bmesh.new()
     verts = [bm.verts.new((x * MM, y * MM, 0.001)) for x, y in room["polygon"]]
     face = bm.faces.new(verts)
-    if face.normal.z < 0:
+    face.normal_update()  # neue Flächen haben noch keine Normale – sonst zeigt der Boden je
+    if face.normal.z < 0:  # nach Umlaufsinn des Raumpolygons nach unten
         face.normal_flip()
     bm.to_mesh(mesh)
     bm.free()
@@ -601,6 +602,7 @@ def _flat_ceiling(room, polygon, height):
     mesh = bpy.data.meshes.new(f"Ceiling_{room['id']}")
     bm = bmesh.new()
     face = bm.faces.new([bm.verts.new((x, y, height)) for x, y in polygon])
+    face.normal_update()
     if face.normal.z > 0:
         face.normal_flip()
     bm.to_mesh(mesh)

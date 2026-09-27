@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useCallback, useEffect, useState } from "react";
 
 import { ModelPreview } from "@/components/ModelPreview";
@@ -16,6 +17,9 @@ import {
 } from "@/lib/api";
 
 const POLL_MS = 2000;
+
+// three.js und der Rundgang werden erst beim Öffnen geladen (nicht im ersten Seitenaufruf)
+const WalkViewer = dynamic(() => import("@/components/WalkViewer"), { ssr: false });
 
 const STATUS_LABEL: Record<Project["status"], string> = {
   processing: "in Bearbeitung",
@@ -112,6 +116,8 @@ function ProjectRow({ project, onDeleted }: { project: ProjectDetail; onDeleted:
   const hasModel = "model_gltf" in project.artifacts;
   const [busy, setBusy] = useState<"delete" | "rerun" | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [walking, setWalking] = useState(false);
+  const closeWalk = useCallback(() => setWalking(false), []);
   const running = project.status === "processing";
 
   async function run(kind: "delete" | "rerun", question: string, action: () => Promise<unknown>) {
@@ -197,9 +203,17 @@ function ProjectRow({ project, onDeleted }: { project: ProjectDetail; onDeleted:
               <a href={artifactUrl(project.id, "blv_result")}>Materialien (JSON)</a>
             )}
           </div>
-          {project.status === "completed" && <ModelPreview src={artifactUrl(project.id, "model_gltf")} />}
+          {project.status === "completed" && (
+            <>
+              <button type="button" onClick={() => setWalking(true)}>
+                Rundgang starten
+              </button>
+              <ModelPreview src={artifactUrl(project.id, "model_gltf")} />
+            </>
+          )}
         </>
       )}
+      {walking && <WalkViewer src={artifactUrl(project.id, "model_gltf")} onClose={closeWalk} />}
     </article>
   );
 }
