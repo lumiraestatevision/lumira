@@ -952,7 +952,7 @@ def _kitchen(b, w, d, fixture):
     worktop = material("Arbeitsplatte", "#3B3936", 0.35)
     steel = metal("Edelstahl", "#B9BBBD", 0.25)
     glass = material("Kochfeld", "#101010", 0.08)
-    tall = 0.6 if w >= 2.4 else 0.0
+    tall = 0.6 if w >= 2.4 and fixture.get("tall_unit", True) else 0.0  # Hochschrank
     base_w = w - tall
     base_x = -w / 2 + base_w / 2
     b.box((base_w, d - 0.06, 0.10), (base_x, -0.03, 0.05), plinth)

@@ -255,8 +255,16 @@ def test_open_kitchen_gets_a_counter_instead_of_a_run_in_the_opening() -> None:
     assert set(items) == {"kitchen", "kitchen_counter"}
     run, counter = items["kitchen"], items["kitchen_counter"]
     assert run["hob"] is False  # Kochfeld sitzt in der Theke
-    # Zeile nicht an der offenen Kante (y = 3600)
-    assert run["y"] < 3_600 - run["d"]
+    # L-Küche: Zeile an der Wand, an der die Theke anstößt (hier rechts), bis an die Theke
+    counter_left = counter["x"] - counter["w"] / 2
+    counter_right = counter["x"] + counter["w"] / 2
+    wall_side = "rechts" if counter_right > 3_800 - 10 else "links"
+    if wall_side == "rechts":
+        assert run["x"] == pytest.approx(3_800 - run["d"] / 2 - 20, abs=5)
+    else:
+        assert counter_left < 10
+        assert run["x"] == pytest.approx(run["d"] / 2 + 20, abs=5)
+    assert run["y"] + run["w"] / 2 == pytest.approx(3_600 - counter["d"], abs=60)
     # Theke an der offenen Kante, Front zeigt in die Küche (nach unten), Rest bleibt Durchgang
     assert counter["y"] == pytest.approx(3_600 - counter["d"] / 2, abs=5)
     assert counter["angle"] == pytest.approx(-math.pi / 2, abs=1e-3)

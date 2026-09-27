@@ -389,12 +389,14 @@ class Layout:
         edges: list[Edge] | None = None,
         clearance: float = 0.0,
         avoid_windows: bool = False,
+        tall: bool | None = None,
     ) -> Rect | None:
         """Erste gültige Position an einer Wand. ``clearance``: freie Tiefe vor der Front;
-        ``avoid_windows``: Wände ohne Fenster zuerst (Bett, Sofa)."""
+        ``avoid_windows``: Wände ohne Fenster zuerst (Bett, Sofa); ``tall``: überschreibt,
+        ob Fenster im Weg sind (Küche ohne Oberschränke passt unter ein Fenster)."""
         w = width or SIZES[kind][0]
         d = SIZES[kind][1]
-        tall = kind in TALL
+        tall = kind in TALL if tall is None else tall
         order = sorted(
             self.edges,
             key=lambda e: (avoid_windows and bool(e.blocked_tall), -e.free_length(tall)),
@@ -542,10 +544,15 @@ def _furnish_office(layout: Layout) -> None:
 
 
 def _furnish_kitchen(layout: Layout, front_color: str) -> None:
-    """Küchenzeile an der längsten freien Wand. Ist die Küche offen zum Nachbarraum (Kante ohne
-    Wand), kommt dort eine Theke mit Kochfeld hin – Unterschränke zur Küche, Überstand zum
-    Wohnbereich, wie in offenen Grundrissen üblich."""
+    """Geschlossene Küche: Zeile an der längsten freien Wand. Offene Küche (Kante ohne Wand zum
+    Nachbarraum): Theke mit Kochfeld an der offenen Kante und die Zeile an der Wand, die dort
+    anschließt – eine L-Küche wie in offenen Grundrissen üblich; steht dort ein Fenster, nur
+    Unterschränke (Spüle unter dem Fenster)."""
     walls = [e for e in layout.edges if not e.open]
+    counter = _kitchen_counter(layout, front_color)
+    if counter is not None:
+        _l_kitchen_run(layout, walls, counter[1], front_color)
+        return
     best = max(walls, key=lambda e: e.free_length(tall=True), default=None)
     if best is None:
         return
@@ -557,18 +564,47 @@ def _furnish_kitchen(layout: Layout, front_color: str) -> None:
         length = min(3600.0, best.free_length(tall=False) - 50)
     if length < 900:
         return
-    counter = _kitchen_counter(layout, front_color)
     run = layout.against_wall("kitchen", width=length, corner=True, edges=[best], clearance=900)
     if run:
-        extra = {"color": front_color, "upper": upper, "hob": counter is None}
+        extra = {"color": front_color, "upper": upper, "hob": True}
         layout.add("kitchen", run, loose=False, extra=extra)
+
+
+def _l_kitchen_run(
+    layout: Layout, walls: list[Edge], corner: tuple[float, float], front_color: str
+) -> None:
+    """Zeile an der Wand, die an der Theke anstößt – so lang wie möglich, bis an die Theke."""
+
+    def distance(edge: Edge) -> float:
+        ends = (edge.point(0.0), edge.point(edge.length))
+        return min(math.hypot(x - corner[0], y - corner[1]) for x, y in ends)
+
+    adjacent = [e for e in walls if distance(e) <= 100.0]
+    for edge in sorted(adjacent, key=lambda e: -e.length) + sorted(walls, key=lambda e: -e.length):
+        windows = bool(edge.blocked_tall)
+        length = min(3600.0, edge.free_length(tall=False) - 50)
+        while length >= 900:
+            run = layout.against_wall(
+                "kitchen", width=length, corner=True, edges=[edge], clearance=900, tall=not windows
+            )
+            if run:
+                extra = {
+                    "color": front_color,
+                    "upper": not windows,
+                    "tall_unit": not windows,
+                    "hob": False,  # Kochfeld sitzt in der Theke
+                }
+                layout.add("kitchen", run, loose=False, extra=extra)
+                return
+            length -= 50
 
 
 COUNTER_MIN = 1200.0
 
 
-def _kitchen_counter(layout: Layout, front_color: str) -> Rect | None:
-    """Theke entlang der offenen Kante: Rücken zum Wohnbereich, an einem Wandende beginnend."""
+def _kitchen_counter(layout: Layout, front_color: str) -> tuple[Rect, tuple[float, float]] | None:
+    """Theke entlang der offenen Kante: Rücken zum Wohnbereich, an einem Wandende beginnend.
+    Liefert die Theke und die Ecke, an der sie an die Wand stößt."""
     open_edges = sorted((e for e in layout.edges if e.open), key=lambda e: -e.length)
     w_max, d, _ = SIZES["kitchen_counter"]
     for edge in open_edges:
@@ -577,15 +613,16 @@ def _kitchen_counter(layout: Layout, front_color: str) -> Rect | None:
         width = min(w_max, edge.length - 900.0)  # Durchgang zum Wohnbereich bleibt frei
         if width < COUNTER_MIN:
             continue
-        for along in (width / 2, edge.length - width / 2):
+        for along, corner in ((width / 2, 0.0), (edge.length - width / 2, edge.length)):
             px, py = edge.point(along)
             rect = Rect(px + nx * d / 2, py + ny * d / 2, angle, width, d)
             zone = rect.moved(forward=450)  # 900 mm Arbeitsfläche davor
             zone = Rect(zone.cx, zone.cy, angle, width, d + 900)
             if layout.fits(rect) and rect_in_polygon(zone, layout.polygon):
-                return layout.add(
+                placed = layout.add(
                     "kitchen_counter", rect, loose=False, extra={"color": front_color}
                 )
+                return placed, edge.point(corner)
     return None
 
 
