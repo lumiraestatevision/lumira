@@ -20,6 +20,7 @@ const MAX_DROP = 0.6;
 const KNEE = 0.35;
 const HEAD = 1.8;
 const MARGIN = 1;
+const GAP_MM = 400; // dickste Innenwand mit Türöffnung
 
 export type Kind = "shell" | "fixture" | "loose";
 
@@ -131,7 +132,52 @@ export class NavGrid {
         grid.addTriangle(a, b, c, normal.y, kind);
       }
     });
+    grid.bridgeGaps();
     return grid;
+  }
+
+  /** Lücken bis GAP_MM zwischen zwei gleich hohen Böden schließen (Türöffnungen ohne Schwelle
+   *  in älteren Modellen). Wände bleiben trotzdem Hindernisse (ihre Flächen blockieren). */
+  private bridgeGaps() {
+    const reach = Math.round(GAP_MM / 1000 / CELL);
+    const additions: [number, number][] = [];
+    // Höhen in Richtung (dc, dr) bis `reach` Zellen weit – die Türöffnung selbst hat oft schon
+    // Höhen (Sturz), nur eben keinen Boden
+    const levelsToward = (col: number, row: number, dc: number, dr: number): number[] => {
+      const found: number[] = [];
+      for (let s = 1; s <= reach; s++) {
+        const c = col + dc * s;
+        const r = row + dr * s;
+        if (c < 0 || r < 0 || c >= this.cols || r >= this.rows) break;
+        const base = (r * this.cols + c) * LEVELS;
+        for (let k = 0; k < LEVELS; k++) {
+          if (!Number.isNaN(this.levels[base + k])) found.push(this.levels[base + k]);
+        }
+      }
+      return found;
+    };
+    for (let row = 0; row < this.rows; row++) {
+      for (let col = 0; col < this.cols; col++) {
+        const cell = row * this.cols + col;
+        const own = Array.from(this.levels.subarray(cell * LEVELS, cell * LEVELS + LEVELS));
+        for (const [dc, dr] of [
+          [1, 0],
+          [0, 1],
+        ]) {
+          const other = levelsToward(col, row, -dc, -dr);
+          const shared = levelsToward(col, row, dc, dr).find(
+            (h) =>
+              other.some((o) => Math.abs(o - h) < 0.05) &&
+              !own.some((o) => !Number.isNaN(o) && Math.abs(o - h) < 0.05),
+          );
+          if (shared !== undefined) {
+            additions.push([cell, shared]);
+            break;
+          }
+        }
+      }
+    }
+    for (const [cell, height] of additions) this.addLevel(cell, height);
   }
 
   // ---------------------------------------------------------------- Aufbau
@@ -177,10 +223,8 @@ export class NavGrid {
       }
       return;
     }
-    // Waagerechte Flächen der Raumhülle sind Laufflächen – unabhängig vom Umlaufsinn (ältere
-    // Modelle haben nach unten zeigende Böden). Decken-Unterseiten stören nicht: von unten
-    // unerreichbar hoch, von oben (Treppenaustritt) wie ein Geschossboden.
-    const walkable = Math.abs(ny) > 0.85 && kind === "shell";
+    if (ny < -0.85 && kind === "shell") return; // Decken-Unterseiten
+    const walkable = ny > 0.85 && kind === "shell";
     // Fläche: alle Zellmittelpunkte im Dreieck (Grundriss-Projektion)
     const minCol = Math.floor((Math.min(a.x, b.x, c.x) - this.minX) / CELL);
     const maxCol = Math.floor((Math.max(a.x, b.x, c.x) - this.minX) / CELL);
@@ -227,15 +271,16 @@ export class NavGrid {
     return !(this.furniture && this.loose.hits(cell, lo, hi));
   }
 
-  /** Standhöhe, wenn man hier stehen kann (Boden erreichbar, Körperumfang frei). */
+  /** Standhöhe, wenn man hier stehen kann: Boden erreichbar, Körperumfang frei und überall
+   *  Boden unter dem Körper (kein Balancieren auf Wandkronen, kein Überhang am Treppenauge). */
   stand(x: number, z: number, feet: number): number | null {
     const g = this.ground(x, z, feet);
     if (g === null || !this.free(x, z, g)) return null;
     for (let k = 0; k < 8; k++) {
       const angle = (k / 8) * Math.PI * 2;
-      if (!this.free(x + Math.cos(angle) * BODY_RADIUS, z + Math.sin(angle) * BODY_RADIUS, g)) {
-        return null;
-      }
+      const px = x + Math.cos(angle) * BODY_RADIUS;
+      const pz = z + Math.sin(angle) * BODY_RADIUS;
+      if (!this.free(px, pz, g) || this.ground(px, pz, g) === null) return null;
     }
     return g;
   }

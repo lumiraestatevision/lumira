@@ -53,6 +53,7 @@ SIZES: dict[str, tuple[float, float, float]] = {
     "coat_rack": (1100, 400, 1900),
     "washing_machine": (600, 620, 850),
     "kitchen": (2400, 620, 2200),  # Länge wird an die Wand angepasst
+    "kitchen_counter": (2400, 900, 920),  # Theke: 600 Schränke + 300 Überstand
     "wc": (380, 560, 800),
     "washbasin": (600, 470, 850),
     "handbasin": (450, 360, 850),
@@ -186,6 +187,7 @@ class Edge:
     blocked_all: list[tuple[float, float]] = field(default_factory=list)
     blocked_tall: list[tuple[float, float]] = field(default_factory=list)
     doorways: list[tuple[float, float]] = field(default_factory=list)  # Öffnungsbreite ohne Zugabe
+    open: bool = False  # keine Wand dahinter (offene Küche, Raumübergang)
 
     @property
     def normal(self) -> tuple[float, float]:  # nach innen (Polygon gegen den Uhrzeigersinn)
@@ -246,13 +248,64 @@ def opening_spans(plan: FloorPlan) -> list[OpeningSpan]:
     return spans
 
 
-def room_edges(polygon: list[tuple[float, float]], spans: Iterable[OpeningSpan]) -> list[Edge]:
+Outline = list[tuple[float, float]]
+
+
+def wall_outlines(plan: FloorPlan) -> list[Outline]:
+    """Grundriss jeder Wand – exakte CAD-Fläche oder Rechteck aus Achse und Dicke."""
+    outlines = []
+    for wall in plan.walls:
+        if wall.footprint:
+            outlines.append([(p.x, p.y) for p in wall.footprint])
+            continue
+        length = wall.length_mm or 1.0
+        ux, uy = (wall.end.x - wall.start.x) / length, (wall.end.y - wall.start.y) / length
+        hx, hy = -uy * wall.thickness_mm / 2, ux * wall.thickness_mm / 2
+        outlines.append(
+            [
+                (wall.start.x + hx, wall.start.y + hy),
+                (wall.end.x + hx, wall.end.y + hy),
+                (wall.end.x - hx, wall.end.y - hy),
+                (wall.start.x - hx, wall.start.y - hy),
+            ]
+        )
+    return outlines
+
+
+OPEN_EDGE_PROBE = 60.0  # so weit hinter der Raumkante wird nach einer Wand gesucht
+
+
+def _is_open(edge: Edge, walls: list[Outline]) -> bool:
+    """Raumkante ohne Wand dahinter? Stichproben alle 200 mm knapp außerhalb des Raums."""
+    nx, ny = edge.normal
+    count = max(1, round(edge.length / 200))
+    samples = [edge.length * (i + 0.5) / count for i in range(count)]
+    walled = 0
+    for along in samples:
+        px, py = edge.point(along)
+        probe = (px - nx * OPEN_EDGE_PROBE, py - ny * OPEN_EDGE_PROBE)
+        if any(point_in_polygon(probe, outline) for outline in walls):
+            walled += 1
+    return walled < 0.5 * len(samples)
+
+
+def room_edges(
+    polygon: list[tuple[float, float]],
+    spans: Iterable[OpeningSpan],
+    walls: list[Outline] | None = None,
+) -> list[Edge]:
     edges = []
     for (x1, y1), (x2, y2) in zip(polygon, polygon[1:] + polygon[:1], strict=True):
         length = math.hypot(x2 - x1, y2 - y1)
         if length < 300:
             continue
         edge = Edge(x1, y1, length, (x2 - x1) / length, (y2 - y1) / length)
+        if walls is not None and _is_open(edge, walls):
+            # offen zum Nachbarraum: keine Möbel mit dem Rücken dorthin
+            edge.open = True
+            edge.blocked_all.append((0.0, length))
+            edges.append(edge)
+            continue
         nx, ny = edge.normal
         for span in spans:
             t = []
@@ -489,17 +542,51 @@ def _furnish_office(layout: Layout) -> None:
 
 
 def _furnish_kitchen(layout: Layout, front_color: str) -> None:
-    best = max(layout.edges, key=lambda e: e.free_length(tall=True), default=None)
+    """Küchenzeile an der längsten freien Wand. Ist die Küche offen zum Nachbarraum (Kante ohne
+    Wand), kommt dort eine Theke mit Kochfeld hin – Unterschränke zur Küche, Überstand zum
+    Wohnbereich, wie in offenen Grundrissen üblich."""
+    walls = [e for e in layout.edges if not e.open]
+    best = max(walls, key=lambda e: e.free_length(tall=True), default=None)
     if best is None:
         return
+    upper = True
     length = min(3600.0, best.free_length(tall=True) - 50)
-    if length < 1200:  # zu kurz für Oberschränke → nur Unterschränke
+    if length < 1200:  # zu kurz für Oberschränke (Fenster) → nur Unterschränke
+        upper = False
+        best = max(walls, key=lambda e: e.free_length(tall=False))
         length = min(3600.0, best.free_length(tall=False) - 50)
     if length < 900:
         return
+    counter = _kitchen_counter(layout, front_color)
     run = layout.against_wall("kitchen", width=length, corner=True, edges=[best], clearance=900)
     if run:
-        layout.add("kitchen", run, loose=False, extra={"color": front_color})
+        extra = {"color": front_color, "upper": upper, "hob": counter is None}
+        layout.add("kitchen", run, loose=False, extra=extra)
+
+
+COUNTER_MIN = 1200.0
+
+
+def _kitchen_counter(layout: Layout, front_color: str) -> Rect | None:
+    """Theke entlang der offenen Kante: Rücken zum Wohnbereich, an einem Wandende beginnend."""
+    open_edges = sorted((e for e in layout.edges if e.open), key=lambda e: -e.length)
+    w_max, d, _ = SIZES["kitchen_counter"]
+    for edge in open_edges:
+        nx, ny = edge.normal
+        angle = math.atan2(ny, nx)
+        width = min(w_max, edge.length - 900.0)  # Durchgang zum Wohnbereich bleibt frei
+        if width < COUNTER_MIN:
+            continue
+        for along in (width / 2, edge.length - width / 2):
+            px, py = edge.point(along)
+            rect = Rect(px + nx * d / 2, py + ny * d / 2, angle, width, d)
+            zone = rect.moved(forward=450)  # 900 mm Arbeitsfläche davor
+            zone = Rect(zone.cx, zone.cy, angle, width, d + 900)
+            if layout.fits(rect) and rect_in_polygon(zone, layout.polygon):
+                return layout.add(
+                    "kitchen_counter", rect, loose=False, extra={"color": front_color}
+                )
+    return None
 
 
 def _furnish_wet(layout: Layout, room: Room, lv: set[str]) -> None:
@@ -526,10 +613,11 @@ def furnish(plan: FloorPlan, blv: BLVResult) -> list[dict[str, Any]]:
     ]
     kitchen_color = kitchens[0].color_hex if kitchens and kitchens[0].color_hex else "#F2F1EC"
     stairs = stair_obstacles(plan)
+    walls = wall_outlines(plan)
     items: list[dict[str, Any]] = []
     for room in plan.rooms:
         polygon = _ccw([(p.x, p.y) for p in room.polygon])
-        layout = Layout(polygon, room_edges(polygon, spans))
+        layout = Layout(polygon, room_edges(polygon, spans, walls))
         if not layout.edges:
             continue
         layout.placed.extend(stairs)

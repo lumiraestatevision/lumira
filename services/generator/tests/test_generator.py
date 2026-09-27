@@ -3,6 +3,7 @@ from __future__ import annotations
 import stat
 import uuid
 from pathlib import Path
+from typing import Literal
 
 import pytest
 
@@ -104,6 +105,8 @@ def test_scene_materials_follow_blv() -> None:
             "sill": 0.0,
             "swing": None,
             "opens_to": None,
+            # Schwelle mit dem Belag des angrenzenden Raums (links der Wand: „bad“)
+            "threshold": next(r["floor"] for r in scene["rooms"] if r["id"] == "bad"),
         }
     ]
     assert wall["footprint"] is None  # Quader aus Achse und Dicke
@@ -117,6 +120,56 @@ def test_scene_passes_exact_wall_footprint() -> None:
     [wall] = build_scene(plan, _blv(plan.project_id))["walls"]
 
     assert wall["footprint"] == [[float(x), float(y)] for x, y in l_shape]
+
+
+DOOR_SIDES: list[tuple[Literal["left", "right"], float]] = [("left", 500), ("right", 2_000)]
+
+
+def test_doors_get_a_threshold_with_the_floor_they_open_into() -> None:
+    """Ohne Schwelle klafft in der Wanddicke eine Lücke im Boden (Rundgang: Absturzkante)."""
+    square = [Point2D(x=x, y=y) for x, y in ((0, 0), (4_000, 0), (4_000, 3_000), (0, 3_000))]
+    below = [Point2D(x=x, y=y) for x, y in ((0, -3_240), (4_000, -3_240), (4_000, -240), (0, -240))]
+    plan = FloorPlan(
+        project_id=uuid.uuid4(),
+        source_key="plan.dxf",
+        source_format=SourceFormat.DXF,
+        # Innenwand auf y = -120 zwischen Bad (oben, links der Wand) und Flur (unten)
+        walls=[
+            Wall(id="w", start=Point2D(x=0, y=-120), end=Point2D(x=4_000, y=-120), thickness_mm=240)
+        ],
+        openings=[
+            Opening(
+                id=f"o_{side}",
+                type=OpeningType.DOOR,
+                wall_id="w",
+                offset_mm=offset,
+                width_mm=885,
+                height_mm=2_010,
+                opens_to=side,
+            )
+            for side, offset in DOOR_SIDES
+        ]
+        + [
+            Opening(
+                id="fenster",
+                type=OpeningType.WINDOW,
+                wall_id="w",
+                offset_mm=3_000,
+                width_mm=800,
+                height_mm=1_000,
+                sill_height_mm=900,
+            )
+        ],
+        rooms=[
+            Room(id="bad", polygon=square, room_type=RoomType.BATHROOM),
+            Room(id="flur", polygon=below, room_type=RoomType.HALLWAY),
+        ],
+    )
+
+    [wall] = build_scene(plan, _blv(plan.project_id))["walls"]
+
+    thresholds = {o["id"]: o["threshold"] and o["threshold"]["name"] for o in wall["openings"]}
+    assert thresholds == {"o_left": "Fliese", "o_right": "Parkett", "fenster": None}
 
 
 def _stair(steps: int = 10) -> Stair:

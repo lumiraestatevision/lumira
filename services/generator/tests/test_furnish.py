@@ -241,3 +241,26 @@ def test_guest_wc_and_kitchen() -> None:
     assert run["loose"] is False
     assert run["color"] == "#DDE3E0"
     assert run["w"] >= 2_400
+    assert run["hob"] is True
+
+
+def test_open_kitchen_gets_a_counter_instead_of_a_run_in_the_opening() -> None:
+    """Muster1: Küche ohne Wand zum Wohnbereich – die Zeile gehört an eine echte Wand, an die
+    offene Kante eine Theke (Rücken zum Wohnbereich), der Durchgang bleibt frei."""
+    kitchen = _plan(3_800, 3_600, RoomType.KITCHEN, [("links", OpeningType.DOOR, 200, 900, 0)])
+    kitchen.walls = [w for w in kitchen.walls if w.id != "oben"]  # offen nach oben
+
+    items = {i["kind"]: i for i in furnish(kitchen, _blv())}
+
+    assert set(items) == {"kitchen", "kitchen_counter"}
+    run, counter = items["kitchen"], items["kitchen_counter"]
+    assert run["hob"] is False  # Kochfeld sitzt in der Theke
+    # Zeile nicht an der offenen Kante (y = 3600)
+    assert run["y"] < 3_600 - run["d"]
+    # Theke an der offenen Kante, Front zeigt in die Küche (nach unten), Rest bleibt Durchgang
+    assert counter["y"] == pytest.approx(3_600 - counter["d"] / 2, abs=5)
+    assert counter["angle"] == pytest.approx(-math.pi / 2, abs=1e-3)
+    assert counter["w"] <= 3_800 - 900
+    polygon = _square(kitchen)
+    assert rect_in_polygon(_rect(counter), polygon)
+    assert not overlaps(_rect(counter), _rect(run))

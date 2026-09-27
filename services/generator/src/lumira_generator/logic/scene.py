@@ -17,8 +17,11 @@ from lumira_shared.models import (
     Material,
     MaterialCategory,
     MaterialLocation,
+    Opening,
+    OpeningType,
     RoomType,
     Stair,
+    Wall,
 )
 
 FALLBACK_FLOOR = {"name": "Estrich", "color": "#9E9A93"}
@@ -174,8 +177,34 @@ def _stairs(plan: FloorPlan, blv: BLVResult, variant: str | None) -> list[dict[s
     ]
 
 
+def _threshold(
+    plan: FloorPlan, wall: Wall, opening: Opening, floors: dict[str, dict[str, Any]]
+) -> dict[str, Any] | None:
+    """Boden in Türen und Durchgängen: Die Raumböden enden an der Wandfläche – ohne Schwelle
+    klafft in der Wanddicke eine Lücke (sichtbar und im Rundgang eine Absturzkante). Belag des
+    Raums, in den die Tür aufschlägt, sonst des ersten angrenzenden Raums."""
+    if opening.type is OpeningType.WINDOW:
+        return None
+    length = wall.length_mm or 1.0
+    ux, uy = (wall.end.x - wall.start.x) / length, (wall.end.y - wall.start.y) / length
+    along = opening.offset_mm + opening.width_mm / 2
+    cx, cy = wall.start.x + ux * along, wall.start.y + uy * along
+    reach = wall.thickness_mm / 2 + 150.0
+    sides = {"left": (-uy, ux), "right": (uy, -ux)}
+    order = [opening.opens_to] if opening.opens_to else []
+    order += [side for side in ("left", "right") if side not in order]
+    for side in order:
+        nx, ny = sides[side]
+        point = (cx + nx * reach, cy + ny * reach)
+        for room in plan.rooms:
+            if point_in_polygon(point, [(p.x, p.y) for p in room.polygon]):
+                return floors[room.id]
+    return None
+
+
 def build_scene(plan: FloorPlan, blv: BLVResult, *, variant: str | None = None) -> dict[str, Any]:
     chosen = variant or (blv.default_variant.name if blv.default_variant else None)
+    floors = {room.id: _floor_for(blv, room.room_type, chosen) for room in plan.rooms}
     walls = [
         {
             "id": wall.id,
@@ -196,6 +225,7 @@ def build_scene(plan: FloorPlan, blv: BLVResult, *, variant: str | None = None) 
                     "sill": o.sill_height_mm,
                     "swing": str(o.swing) if o.swing else None,
                     "opens_to": o.opens_to,
+                    "threshold": _threshold(plan, wall, o, floors),
                 }
                 for o in plan.openings_in(wall.id)
             ],
@@ -208,7 +238,7 @@ def build_scene(plan: FloorPlan, blv: BLVResult, *, variant: str | None = None) 
             "type": str(room.room_type),
             "label": room.label,
             "polygon": [[p.x, p.y] for p in room.polygon],
-            "floor": _floor_for(blv, room.room_type, chosen),
+            "floor": floors[room.id],
         }
         for room in plan.rooms
     ]

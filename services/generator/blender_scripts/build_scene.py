@@ -44,6 +44,7 @@ WALL_CROWN_COLOR = "#4A4A4A"  # Wandkrone dunkel wie im Architekturmodell
 GLASS_COLOR = "#C9DCE3"
 DOOR_LEAF_MM = 40.0
 DOOR_FRAME_MM = 30.0
+DOOR_LEAF_MAX = 1.01  # m – breitere Öffnungen bekommen ein festes Seitenteil
 WINDOW_PROFILE_MM = 70.0
 WINDOW_DEPTH_MM = 80.0
 BASE_UV = "UVMap"  # Materialtexturen (glTF TEXCOORD_0)
@@ -456,10 +457,35 @@ def build_door(frame, opening, door_mat):
     ):
         _part(f"Zarge_{oid}_{tag}", size, frame.point(along, 0, z), frame.angle, door_mat)
 
-    leaf_width = width - 2 * f - 0.006
     leaf_height = height - f - 0.01
     hinge_at_start = opening.get("swing") != "right"
     side = -1.0 if opening.get("opens_to") == "right" else 1.0
+    clear = width - 2 * f
+    leaf_width = clear - 0.006
+    if clear > DOOR_LEAF_MAX + 0.2:
+        # Breite Öffnung (Haustür mit Seitenteil): Blatt max. ~1 m, der Rest ist ein festes
+        # Seitenteil auf der Gegenseite – ein 1,5-m-Blatt stünde geöffnet quer im Flur.
+        leaf_width = DOOR_LEAF_MAX - 0.006
+        panel = clear - DOOR_LEAF_MAX - f  # abzüglich Pfosten zwischen Blatt und Seitenteil
+        post = start + f + DOOR_LEAF_MAX + f / 2
+        panel_centre = start + width - f - panel / 2
+        if not hinge_at_start:
+            post = start + width - f - DOOR_LEAF_MAX - f / 2
+            panel_centre = start + f + panel / 2
+        _part(
+            f"Zarge_{oid}_M",
+            (f, depth, height),
+            frame.point(post, 0, height / 2),
+            frame.angle,
+            door_mat,
+        )
+        _part(
+            f"Seitenteil_{oid}",
+            (panel, leaf, leaf_height),
+            frame.point(panel_centre, 0, 0.005 + leaf_height / 2),
+            frame.angle,
+            door_mat,
+        )
     hinge_along = start + f + leaf / 2 if hinge_at_start else start + width - f - leaf / 2
     # Blatt steht senkrecht zur Wand und ragt ab der Wandoberfläche in den Raum.
     centre_across = side * (frame.thickness / 2 + leaf_width / 2)
@@ -515,7 +541,35 @@ def build_wall(wall, scene_spec):
             build_window(frame, opening, window_mat)
         elif opening["type"] == "door":
             build_door(frame, opening, door_mat)
+        if opening.get("threshold"):
+            build_threshold(frame, opening)
     return len(cutters)
+
+
+def build_threshold(frame, opening):
+    """Boden in der Wanddicke einer Tür/eines Durchgangs – verbindet die Raumböden."""
+    start = opening["offset"] * MM
+    end = start + opening["width"] * MM
+    half = frame.thickness / 2
+    corners = [
+        frame.point(start, -half, 0.001),
+        frame.point(end, -half, 0.001),
+        frame.point(end, half, 0.001),
+        frame.point(start, half, 0.001),
+    ]
+    mesh = bpy.data.meshes.new(f"Floor_threshold_{opening['id']}")
+    bm = bmesh.new()
+    face = bm.faces.new([bm.verts.new(c) for c in corners])
+    face.normal_update()
+    if face.normal.z < 0:
+        face.normal_flip()
+    bm.to_mesh(mesh)
+    bm.free()
+    obj = bpy.data.objects.new(f"Floor_threshold_{opening['id']}", mesh)
+    bpy.context.scene.collection.objects.link(obj)
+    surface = opening["threshold"]
+    box_uv(obj, uv_size_m(surface))
+    mesh.materials.append(surface_material(surface))
 
 
 def build_floor(room):
@@ -909,13 +963,31 @@ def _kitchen(b, w, d, fixture):
         b.box((0.003, 0.003, 0.74), (-w / 2 + base_w * i / doors, d / 2 - 0.01, 0.48), plinth)
     b.box((0.50, 0.42, 0.012), (-w / 2 + base_w * 0.3, 0.02, 0.906), steel)
     b.cylinder(0.015, 0.30, (-w / 2 + base_w * 0.3, -d / 2 + 0.08, 1.05), steel)
-    if base_w >= 1.8:
+    if base_w >= 1.8 and fixture.get("hob", True):  # sonst sitzt das Kochfeld in der Theke
         b.box((0.58, 0.51, 0.006), (-w / 2 + base_w * 0.75, 0.02, 0.903), glass)
     if tall:
         b.box((tall, d, 2.15), (w / 2 - tall / 2, 0, 0.10 + 1.075), front, bevel=0.002)
         b.box((tall, d - 0.06, 0.10), (w / 2 - tall / 2, -0.03, 0.05), plinth)
     if fixture.get("upper", True):
         b.box((base_w, 0.35, 0.72), (base_x, -d / 2 + 0.175, 1.45 + 0.36), front, bevel=0.002)
+
+
+def _kitchen_counter(b, w, d, fixture):
+    """Theke der offenen Küche: Unterschränke zur Küche (+y), Arbeitsplatte mit Überstand
+    zum Wohnbereich (Sitzplatz), Rückwand in Frontfarbe, Kochfeld."""
+    front = material("Küchenfront", fixture.get("color") or "#F2F1EC", 0.35)
+    plinth = material("Küchensockel", "#2B2B2B", 0.6)
+    worktop = material("Arbeitsplatte", "#3B3936", 0.35)
+    glass = material("Kochfeld", "#101010", 0.08)
+    cabinet = 0.6
+    cy = d / 2 - cabinet / 2
+    b.box((w, cabinet - 0.06, 0.10), (0, cy - 0.03, 0.05), plinth)
+    b.box((w, cabinet - 0.02, 0.76), (0, cy - 0.01, 0.48), front, bevel=0.002)
+    b.box((w, d, 0.04), (0, 0, 0.88), worktop, bevel=0.003)
+    doors = max(1, round(w / 0.6))
+    for i in range(1, doors):
+        b.box((0.003, 0.003, 0.74), (-w / 2 + w * i / doors, d / 2 - 0.01, 0.48), plinth)
+    b.box((0.58, 0.51, 0.006), (0, cy + 0.02, 0.903), glass)
 
 
 def _sanitary(b, kind, w, d, h):
@@ -1011,6 +1083,8 @@ def build_fixture(fixture):
     b = Builder()
     if kind == "kitchen":
         _kitchen(b, w, d, fixture)
+    elif kind == "kitchen_counter":
+        _kitchen_counter(b, w, d, fixture)
     elif kind in ("wc", "washbasin", "handbasin", "shower", "bathtub", "washing_machine"):
         _sanitary(b, kind, w, d, h)
     else:
