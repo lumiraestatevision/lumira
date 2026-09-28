@@ -2,13 +2,14 @@
 Allplan, Vectorworks & Co.).
 
 Ablauf – alles in Millimetern, ohne Lernverfahren:
-  1. Wandfarbe: die unbunte, dunkle Füllfarbe mit der größten Gesamtfläche (meist Grau).
-  2. Jede Wandfläche wird eine Wand mit exaktem Grundriss (``footprint``, auch Gehrung/L-Form).
+  1. Wandfarbe: die Füllfarbe mit der größten Fläche an Streifen in Wanddicke (Grau, Orange …).
+  2. Jede Wandfläche wird eine Wand mit exaktem Grundriss (``footprint``, auch Gehrung/L-Form
+     oder ein ganzer verzweigter Wandzug als ein Polygon).
   3. Öffnungen: Zwei Wandstirnseiten, die sich über eine Lücke von 0,45–3,6 m exakt gegenüber
      stehen, begrenzen eine Öffnung. Die Lücke wird eine eigene Wand mit Öffnung – so entstehen
      im 3D-Modell Sturz und Brüstung.
      Tür: ein Aufschlagbogen im Radius der Lückenbreite. Fenster: Lücke in einer Außenwand.
-     Sonst: Durchgang.
+     Sonst: Durchgang. Scheinöffnungen, die nur einen Zwickel abschließen, fallen weg.
   4. Außen/innen: Rasterbild aus Wänden + geschlossenen Öffnungen, Flutfüllung vom Rand.
   5. Räume: farbig hinterlegte Flächen; ohne solche die von Wänden umschlossenen Flächen.
   6. Beschriftung: alle Texte im Raum („Küche“, „F: 13,39 m²“), reine Maßzahlen ausgenommen.
@@ -77,17 +78,43 @@ def _is_room_color(color: str | None, wall_color: str) -> bool:
     return max(rgb) - min(rgb) >= 20  # bunt (nicht weiß/grau/schwarz)
 
 
+WALL_THICKNESS_MM = (50.0, 600.0)  # mittlere Dicke eines Wandstreifens
+MIN_WALL_FILL_MM2 = 50_000.0  # 0,05 m² – kleinere Flächen sind Symbole, Schraffurpunkte …
+
+
+def _mean_thickness(points: np.ndarray, area: float) -> float:
+    """Mittlere Dicke eines Streifens: 2 · Fläche / Umfang (auch für verzweigte Wandzüge)."""
+    perimeter = float(np.linalg.norm(np.roll(points, -1, axis=0) - points, axis=1).sum())
+    return 2 * area / perimeter if perimeter else 0.0
+
+
+def _is_near_white(color: str) -> bool:
+    rgb = _rgb(color)
+    return rgb is not None and min(rgb) >= 235
+
+
 def wall_color(areas: list[FilledArea]) -> str | None:
-    """Die dunkle unbunte Füllfarbe mit der größten Fläche – sofern es genug solcher Flächen gibt."""
+    """Wandfarbe nach Form statt nach Farbton: die Füllfarbe, deren Flächen am meisten
+    Wandstreifen sind (mittlere Dicke 5–60 cm). Büros zeichnen Wände grau (Muster1), orange,
+    schwarz …; Räume sind dagegen breite Flächen, Beschriftungsfelder weiß.
+
+    Gleichstand: dunkle unbunte Farbe bevorzugt (klassischer CAD-Export)."""
     totals: dict[str, float] = defaultdict(float)
     counts: dict[str, int] = defaultdict(int)
     for area in areas:
-        if _is_achromatic_dark(area.color):
-            assert area.color is not None
-            totals[area.color] += polygon_area_mm2(area.polygon)
+        if not area.color or _is_near_white(area.color):
+            continue
+        size = polygon_area_mm2(area.polygon)
+        if size < MIN_WALL_FILL_MM2:
+            continue
+        thickness = _mean_thickness(_array(area.polygon), size)
+        if WALL_THICKNESS_MM[0] <= thickness <= WALL_THICKNESS_MM[1]:
+            totals[area.color] += size
             counts[area.color] += 1
-    candidates = [c for c in totals if counts[c] >= 4]
-    return max(candidates, key=lambda c: totals[c]) if candidates else None
+    candidates = [c for c in totals if counts[c] >= 3]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda c: (totals[c], _is_achromatic_dark(c)))
 
 
 # ------------------------------------------------------------------ Geometrie
@@ -225,9 +252,18 @@ def _jamb_edges(pieces: list[Piece]) -> list[Edge]:
     return edges
 
 
+def _wall_behind(edge: Edge, away: np.ndarray, pieces: list[Piece]) -> bool:
+    """Liegt die Wandfläche direkt hinter der Stirnseite (von der Lücke abgewandt)?
+    Lokal geprüft statt über den Schwerpunkt – verzweigte Wandzüge (ein Polygon für den
+    ganzen Grundriss) haben ihren Schwerpunkt irgendwo."""
+    x, y = edge.mid + away / np.linalg.norm(away) * 20.0
+    return _inside(pieces[edge.piece].points, x, y)
+
+
 def _faces(e1: Edge, e2: Edge, pieces: list[Piece]) -> bool:
-    """Stehen sich zwei Stirnseiten über eine Lücke gegenüber?"""
-    if e1.piece == e2.piece:
+    """Stehen sich zwei Stirnseiten über eine Lücke gegenüber? Beide dürfen zum selben
+    Wandzug gehören (Tür zwischen zwei Ästen eines verzweigten Polygons)."""
+    if e1 is e2:
         return False
     if abs(_cross(e1.direction, e2.direction)) > math.sin(math.radians(3)):
         return False
@@ -239,8 +275,7 @@ def _faces(e1: Edge, e2: Edge, pieces: list[Piece]) -> bool:
     if lateral > 0.25 * e1.length or not MIN_OPENING_MM <= width <= MAX_OPENING_MM:
         return False
     # Die Wände liegen jeweils auf der abgewandten Seite ihrer Stirnseite.
-    c1, c2 = _centroid(pieces[e1.piece].points), _centroid(pieces[e2.piece].points)
-    return float(np.dot(c1 - e1.mid, delta)) < 0 and float(np.dot(c2 - e2.mid, -delta)) < 0
+    return _wall_behind(e1, -delta, pieces) and _wall_behind(e2, delta, pieces)
 
 
 def _gap_is_free(gap: Gap, pieces: list[Piece]) -> bool:
@@ -404,13 +439,13 @@ class Raster:
         return not (0 <= row < h and 0 <= col < w) or bool(self.outside[row, col])
 
 
-def _raster(pieces: list[Piece], gaps: list[Gap]) -> Raster:
+def _raster(pieces: list[Piece], quads: list[np.ndarray]) -> Raster:
     all_pts = np.vstack([p.points for p in pieces])
     origin = all_pts.min(axis=0) - 1_000.0
     size = np.ceil((all_pts.max(axis=0) + 1_000.0 - origin) / RASTER_MM).astype(int) + 1
     blocked = np.zeros((size[1], size[0]), dtype=np.uint8)
     raster = Raster(origin, blocked, blocked)
-    for poly in [p.points for p in pieces] + [g.quad() for g in gaps]:
+    for poly in [p.points for p in pieces] + quads:
         cv2.fillPoly(blocked, [raster.to_px(poly)], 1)
     # kleine Fugen zwischen Wandstücken schließen (Rundungsfehler, Dehnfugen)
     blocked = cv2.dilate(blocked, np.ones((3, 3), np.uint8))
@@ -420,18 +455,77 @@ def _raster(pieces: list[Piece], gaps: list[Gap]) -> Raster:
     return Raster(origin, blocked, free == 2)
 
 
+def _side_samples(aperture: Aperture) -> list[list[np.ndarray]]:
+    """Je Seite der Öffnung drei Punkte knapp hinter der Laibung."""
+    axis = (aperture.end - aperture.start) / aperture.width
+    normal = np.array([-axis[1], axis[0]])
+    offset = aperture.thickness / 2 + 100.0
+    return [
+        [
+            aperture.start + (aperture.end - aperture.start) * t + sign * normal * offset
+            for t in (0.2, 0.5, 0.8)
+        ]
+        for sign in (1, -1)
+    ]
+
+
+def _opens_outside(aperture: Aperture, raster: Raster) -> bool:
+    """Außenöffnung (Fenster) – je Öffnung geprüft, denn ein verzweigter Wandzug ist
+    zugleich Außen- und Innenwand."""
+    return any(raster.is_outside(x, y) for side in _side_samples(aperture) for x, y in side)
+
+
+def _connects_rooms(
+    aperture: Aperture, raster: Raster, labels: np.ndarray, sizes: np.ndarray
+) -> bool:
+    """Eine echte Öffnung führt auf beiden Seiten in einen Raum oder ins Freie. Zufällig
+    gegenüberstehende Wandenden (Nische vor dem Eingang, Wandstummel quer durch die Diele)
+    schließen dagegen nur einen Zwickel unter Mindestraumgröße ab."""
+    h, w = labels.shape
+    for side in _side_samples(aperture):
+        reached = 0
+        for x, y in side:
+            col, row = raster.to_px(np.array([x, y]))
+            if not (0 <= row < h and 0 <= col < w) or raster.outside[row, col]:
+                reached += 1
+            elif raster.blocked[row, col]:
+                continue  # Wandecke direkt neben der Öffnung – kein Urteil
+            elif sizes[labels[row, col]] * RASTER_MM**2 / 1e6 >= MIN_ROOM_M2:
+                reached += 1
+            else:
+                return False  # Zwickel
+        if not reached:
+            return False
+    return True
+
+
+def prune_apertures(pieces: list[Piece], found: list[Aperture]) -> tuple[list[Aperture], Raster]:
+    """Scheinöffnungen einzeln entfernen – breiteste zuerst, denn eine Scheinöffnung kann
+    auch eine echte Tür daneben vom Raum abschneiden."""
+    found = list(found)
+    while True:
+        raster = _raster(pieces, [q for a in found for q in a.quads])
+        inner = ((raster.blocked == 0) & ~raster.outside).astype(np.uint8)
+        _, labels, stats, _ = cv2.connectedComponentsWithStats(inner, connectivity=4)
+        sizes = stats[:, cv2.CC_STAT_AREA]
+        bad = [a for a in found if not _connects_rooms(a, raster, labels, sizes)]
+        if not bad:
+            return found, raster
+        worst = max(bad, key=lambda a: a.width)
+        found = [a for a in found if a is not worst]
+
+
 def _outward_points(points: np.ndarray, offset: float) -> list[np.ndarray]:
-    centre = _centroid(points)
+    # Außennormale über den Umlaufsinn – gilt auch für verzweigte, nicht konvexe Wandzüge.
+    x, y = points[:, 0], points[:, 1]
+    ccw = float(np.dot(x, np.roll(y, -1)) - np.dot(np.roll(x, -1), y)) > 0
     samples = []
     for i in range(len(points)):
         a, b = points[i], points[(i + 1) % len(points)]
         if np.linalg.norm(b - a) < 100.0:
             continue
-        mid = (a + b) / 2
-        normal = np.array([-(b - a)[1], (b - a)[0]]) / np.linalg.norm(b - a)
-        if np.dot(normal, mid - centre) < 0:
-            normal = -normal
-        samples.append(mid + normal * offset)
+        normal = np.array([(b - a)[1], -(b - a)[0]]) / np.linalg.norm(b - a)
+        samples.append((a + b) / 2 + (normal if ccw else -normal) * offset)
     return samples
 
 
@@ -482,18 +576,15 @@ def recognize_cad(parsed: ParsedPlan) -> FloorPlan | None:
     if len(pieces) < 4:
         return None
 
-    gaps = find_gaps(pieces)
-    raster = _raster(pieces, gaps)
+    found, raster = prune_apertures(pieces, apertures(find_gaps(pieces)))
     for piece in pieces:
         piece.wall.is_exterior = _is_exterior(piece.points, raster)
 
     walls = [p.wall for p in pieces]
-    found = apertures(gaps)
     doors = assign_door_arcs(found, parsed.curves)
     openings: list[Opening] = []
     for n, aperture in enumerate(found):
-        # Mehrschalige Außenwand: nur die äußerste Schicht grenzt ans Freie.
-        exterior = any(pieces[i].wall.is_exterior for i in aperture.pieces)
+        exterior = _opens_outside(aperture, raster)
         gap_wall = Wall(
             id=f"gap_{n:03d}",
             start=Point2D(x=float(aperture.start[0]), y=float(aperture.start[1])),

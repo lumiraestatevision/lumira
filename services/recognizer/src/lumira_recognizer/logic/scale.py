@@ -27,8 +27,9 @@ class ScaleCheck:
 
 
 def label_area(label: str | None) -> float | None:
-    match = _AREA.search(label or "")
-    return float(match.group(1).replace(",", ".")) if match else None
+    """Flächenangabe der Raumbeschriftung – nur wenn eindeutig (zusammengelegte Räume tragen mehrere)."""
+    matches = _AREA.findall(label or "")
+    return float(matches[0].replace(",", ".")) if len(matches) == 1 else None
 
 
 def check_scale(plan: FloorPlan, current_scale: float | None) -> ScaleCheck:

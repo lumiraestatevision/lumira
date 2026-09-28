@@ -122,7 +122,10 @@ def start_symbols(lines: list[np.ndarray]) -> list[tuple[np.ndarray, float]]:
 
 
 def _angle(v: np.ndarray, w: np.ndarray) -> float:
-    cos = v @ w / (float(np.linalg.norm(v)) * float(np.linalg.norm(w)))
+    norm = float(np.linalg.norm(v)) * float(np.linalg.norm(w))
+    if norm == 0:
+        return math.nan  # Nullvektor (doppelter Punkt) – passt zu keinem Winkelkriterium
+    cos = v @ w / norm
     return math.degrees(math.acos(float(np.clip(cos, -1.0, 1.0))))
 
 
