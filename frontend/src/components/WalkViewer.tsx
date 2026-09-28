@@ -54,6 +54,9 @@ export default function WalkViewer({ src, onClose }: { src: string; onClose: () 
   const [hasFurniture, setHasFurniture] = useState(false);
   const [vrSupported, setVrSupported] = useState(false);
   const [inVr, setInVr] = useState(false);
+  const [touched, setTouched] = useState(false);
+  const [touchDevice, setTouchDevice] = useState(false);
+  useEffect(() => setTouchDevice(window.matchMedia("(pointer: coarse)").matches), []);
   const [variantNames, setVariantNames] = useState<string[]>([]);
   const [variant, setVariant] = useState("");
 
@@ -173,6 +176,7 @@ export default function WalkViewer({ src, onClose }: { src: string; onClose: () 
     const touches = new Map<number, TouchRole>();
     const onPointerDown = (event: PointerEvent) => {
       if (event.pointerType !== "touch") return;
+      setTouched(true); // Hinweis ausblenden, sobald jemand wischt
       const role = event.clientX < host.clientWidth / 2 ? "move" : "look";
       touches.set(event.pointerId, { role, x: event.clientX, y: event.clientY, startX: event.clientX, startY: event.clientY });
     };
@@ -322,11 +326,19 @@ export default function WalkViewer({ src, onClose }: { src: string; onClose: () 
           <p>{error}</p>
         </div>
       )}
-      {ready && !locked && !inVr && (
+      {ready && !locked && !inVr && !touched && (
         <div className="walk-hint">
-          <strong>Klicken zum Umsehen</strong>
-          <span>W A S D oder Pfeiltasten gehen · Shift schneller · Esc beendet</span>
-          <span>Handy: links ziehen = gehen, rechts ziehen = umsehen</span>
+          {touchDevice ? (
+            <>
+              <strong>Links wischen = gehen · rechts wischen = umsehen</strong>
+              <span>„Schließen“ oben rechts beendet den Rundgang</span>
+            </>
+          ) : (
+            <>
+              <strong>Klicken zum Umsehen</strong>
+              <span>W A S D oder Pfeiltasten gehen · Shift schneller · Esc beendet</span>
+            </>
+          )}
         </div>
       )}
       <div className="walk-controls">

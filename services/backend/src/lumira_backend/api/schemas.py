@@ -27,9 +27,19 @@ class ProjectRead(BaseModel):
     current_step: str | None
     artifacts: dict[str, str]
     error: dict[str, Any] | None
+    share_token: str | None = None
     created_at: datetime
     updated_at: datetime
 
 
 class ProjectDetail(ProjectRead):
     events: list[EventRead]
+
+
+class SharedProject(BaseModel):
+    """Was ein Kunde über den geteilten Link sieht – bewusst ohne IDs, Dateien und Verlauf."""
+
+    name: str
+    status: ProjectStatus
+    has_model: bool
+    updated_at: datetime

@@ -12,7 +12,11 @@
 		max_size 100MB
 	}
 
-	basic_auth {
+	# Kunden-Links (/share/<geheimer Schlüssel>) ohne Passwort: die Seite, ihre App-Dateien und
+	# die Share-API (nur Name + 3D-Modell). Alles andere – Projektliste, Uploads, Dateien –
+	# bleibt hinter dem Passwort.
+	@protected not path /share/* /api/share/* /_next/* /favicon.ico
+	basic_auth @protected {
 		{$DEMO_USER:lumira} {$DEMO_PASSWORD_HASH}
 	}
 

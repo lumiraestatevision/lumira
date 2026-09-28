@@ -14,6 +14,9 @@ import {
   getProject,
   rerunProject,
   listProjects,
+  shareProject,
+  shareUrl,
+  unshareProject,
 } from "@/lib/api";
 
 const POLL_MS = 2000;
@@ -114,14 +117,19 @@ export default function Home() {
 function ProjectRow({ project, onDeleted }: { project: ProjectDetail; onDeleted: () => Promise<void> }) {
   const done = new Set(project.events.map((e) => e.type));
   const hasModel = "model_gltf" in project.artifacts;
-  const [busy, setBusy] = useState<"delete" | "rerun" | null>(null);
+  const [busy, setBusy] = useState<"delete" | "rerun" | "share" | null>(null);
+  const [copied, setCopied] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [walking, setWalking] = useState(false);
   const closeWalk = useCallback(() => setWalking(false), []);
   const running = project.status === "processing";
 
-  async function run(kind: "delete" | "rerun", question: string, action: () => Promise<unknown>) {
-    if (!window.confirm(question)) return;
+  async function run(
+    kind: "delete" | "rerun" | "share",
+    question: string | null,
+    action: () => Promise<unknown>,
+  ) {
+    if (question && !window.confirm(question)) return;
     setBusy(kind);
     setActionError(null);
     try {
@@ -146,6 +154,22 @@ function ProjectRow({ project, onDeleted }: { project: ProjectDetail; onDeleted:
       `Projekt „${project.name}“ mit allen Dateien und dem 3D-Modell endgültig löschen?`,
       () => deleteProject(project.id),
     );
+  const onShare = () => run("share", null, () => shareProject(project.id));
+  const onUnshare = () =>
+    run(
+      "share",
+      "Kunden-Link deaktivieren? Wer den Link hat, sieht das Projekt danach nicht mehr.",
+      () => unshareProject(project.id),
+    );
+  async function copyLink(token: string) {
+    try {
+      await navigator.clipboard.writeText(shareUrl(token));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      window.prompt("Link kopieren:", shareUrl(token)); // ohne https kein Zugriff auf die Zwischenablage
+    }
+  }
 
   return (
     <article className="project">
@@ -153,6 +177,17 @@ function ProjectRow({ project, onDeleted }: { project: ProjectDetail; onDeleted:
         <strong>{project.name}</strong>
         <span className="actions">
           <span className={`badge ${project.status}`}>{STATUS_LABEL[project.status]}</span>
+          {!project.share_token && (
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => void onShare()}
+              disabled={busy !== null}
+              title="Link für Kunden: nur Ansicht und Rundgang, ohne Verwaltung"
+            >
+              {busy === "share" ? "Wird erstellt …" : "Kunden-Link"}
+            </button>
+          )}
           <button
             type="button"
             className="secondary"
@@ -182,6 +217,24 @@ function ProjectRow({ project, onDeleted }: { project: ProjectDetail; onDeleted:
         </span>
       </header>
       {actionError && <p className="error">{actionError}</p>}
+      {project.share_token && (
+        <div className="share-link">
+          <span>Kunden-Link</span>
+          <input
+            type="text"
+            readOnly
+            value={shareUrl(project.share_token)}
+            onFocus={(event) => event.target.select()}
+            aria-label="Kunden-Link"
+          />
+          <button type="button" className="secondary" onClick={() => void copyLink(project.share_token!)}>
+            {copied ? "Kopiert ✓" : "Kopieren"}
+          </button>
+          <button type="button" className="danger" onClick={() => void onUnshare()} disabled={busy !== null}>
+            Deaktivieren
+          </button>
+        </div>
+      )}
       <ol className="steps">
         {PIPELINE_STEPS.map((step) => (
           <li key={step} className={done.has(step) ? "done" : undefined}>

@@ -93,8 +93,12 @@ make demo-stop   # Demo vom Internet trennen (lokal läuft alles weiter)
 ```
 
 - Vorher in `.env` ein `DEMO_PASSWORD` setzen (mind. 12 Zeichen); Benutzer ist `DEMO_USER`.
-  Jede Seite und jeder API-Aufruf verlangt die Anmeldung. Nur der Demo-Eingang (`demo-proxy`)
-  ist erreichbar, alle anderen Ports bleiben auf `127.0.0.1`.
+  Jede Seite und jeder API-Aufruf verlangt die Anmeldung – außer Kunden-Links (s. u.). Nur der
+  Demo-Eingang (`demo-proxy`) ist erreichbar, alle anderen Ports bleiben auf `127.0.0.1`.
+- **Kunden-Link**: beim Projekt „Kunden-Link“ → Adresse `…/share/<geheimer Schlüssel>` an
+  Interessenten schicken. Sie sehen nur Projektname, 3D-Vorschau (mit Varianten) und den
+  Rundgang – ohne Passwort, ohne Projektliste und Dateien. „Deaktivieren“ macht den Link
+  sofort ungültig; „Neu berechnen“ behält ihn (zeigt dann das neue Modell).
 - Die Adresse ändert sich bei jedem Start, und die Demo ist nur erreichbar, solange der PC läuft.
   Uploads über den Tunnel: höchstens 100 MB. Quick Tunnels haben keine Verfügbarkeitszusage –
   für einen Dauerbetrieb später auf einen Server umziehen.

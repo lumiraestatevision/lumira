@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import PurePath
@@ -45,6 +46,7 @@ STUCK_AFTER = timedelta(minutes=30)  # länger „in Bearbeitung“ = hängt →
 UPLOAD_ARTIFACTS = {Artifact.FLOOR_PLAN_SOURCE, Artifact.BLV_SOURCE, Artifact.REFERENCE_IMAGES}
 # Ordner unter projects/<id>/, die die Services schreiben (siehe STEP in den Handlern)
 PIPELINE_STEP_FOLDERS = ("parser", "recognizer", "classifier", "blv", "generator", "unreal")
+SHARE_TOKEN_BYTES = 24  # 192 Bit Zufall → 32 Zeichen, nicht erratbar
 
 Ctx = Annotated[ServiceContext, Depends(get_context)]
 
@@ -234,13 +236,39 @@ async def delete_project(project_id: uuid.UUID, ctx: Ctx, db: Db) -> Response:
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+@router.post("/{project_id}/share")
+async def share_project(project_id: uuid.UUID, db: Db) -> ProjectRead:
+    """Kunden-Link anlegen (bleibt bei „Neu berechnen“ gleich und zeigt dann das neue Modell)."""
+    async with db.sessionmaker() as session, session.begin():
+        project = await session.get(Project, project_id)
+        if project is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Projekt nicht gefunden")
+        if project.share_token is None:
+            project.share_token = secrets.token_urlsafe(SHARE_TOKEN_BYTES)
+        return ProjectRead.model_validate(project)
+
+
+@router.delete("/{project_id}/share", status_code=status.HTTP_204_NO_CONTENT)
+async def unshare_project(project_id: uuid.UUID, db: Db) -> Response:
+    """Kunden-Link widerrufen – der alte Link zeigt danach nichts mehr."""
+    async with db.sessionmaker() as session, session.begin():
+        project = await session.get(Project, project_id)
+        if project is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Projekt nicht gefunden")
+        project.share_token = None
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.get("/{project_id}/artifacts/{name}")
 async def get_artifact(project_id: uuid.UUID, name: str, ctx: Ctx, db: Db) -> Response:
     async with db.sessionmaker() as session:
         project = await session.get(Project, project_id)
     if project is None or name not in project.artifacts:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Artefakt nicht gefunden")
-    key = project.artifacts[name]
+    return await artifact_response(ctx, project.artifacts[name])
+
+
+async def artifact_response(ctx: ServiceContext, key: str) -> Response:
     try:
         data = await ctx.storage.get_bytes(key)
     except ObjectNotFoundError as exc:

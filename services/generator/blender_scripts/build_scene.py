@@ -1227,6 +1227,7 @@ def lightmap_uvs(receivers):
     view_layer.objects.active = receivers[0]
     bpy.ops.object.mode_set(mode="EDIT")
     bpy.ops.mesh.select_all(action="SELECT")
+    started = time.time()
     bpy.ops.uv.smart_project(
         angle_limit=math.radians(66.0),
         island_margin=0.003,
@@ -1234,9 +1235,19 @@ def lightmap_uvs(receivers):
         correct_aspect=True,
         scale_to_bounds=False,
     )
-    # dichter packen (Smart UV lässt viel frei) – gleicher Maßstab für alle Inseln
+    smart_s = time.time() - started
+    # dichter packen (Smart UV lässt viel frei) – gleicher Maßstab für alle Inseln. Rechteck-
+    # packung mit 90°-Drehungen: Wände/Böden sind fast nur Rechtecke; die genaue Umriss-
+    # packung mit beliebigen Winkeln brauchte bei manchen Grundrissen Minuten.
     bpy.ops.uv.select_all(action="SELECT")
-    bpy.ops.uv.pack_islands(rotate=True, margin_method="FRACTION", margin=0.004)
+    bpy.ops.uv.pack_islands(
+        rotate=True,
+        rotate_method="CARDINAL",
+        shape_method="AABB",
+        margin_method="FRACTION",
+        margin=0.004,
+    )
+    print(f"Lightmap-UVs: Smart UV {smart_s:.1f} s, Packen {time.time() - started - smart_s:.1f} s")
     bpy.ops.object.mode_set(mode="OBJECT")
 
 

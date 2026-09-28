@@ -12,7 +12,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from redis.asyncio import Redis
 
-from lumira_backend.api import projects
+from lumira_backend.api import projects, share
 from lumira_backend.config import BackendSettings
 from lumira_backend.db import Database
 from lumira_backend.orchestrator import build_handlers
@@ -52,6 +52,7 @@ def create_app(
         allow_headers=["*"],
     )
     app.include_router(projects.router)
+    app.include_router(share.router)  # Kunden-Link, ohne Verwaltung
     return app
 
 

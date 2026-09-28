@@ -204,6 +204,43 @@ def test_rerun_keeps_uploads_and_restarts_pipeline(stack: Stack) -> None:
     assert detail["status"] == "processing"
 
 
+def test_share_link_shows_only_name_and_model(stack: Stack) -> None:
+    """Kunden-Link: geheimer Schlüssel, nur Name/Status/3D-Modell, widerrufbar."""
+    pid = _upload(stack).json()["id"]
+    first = stack.client.post(f"/projects/{pid}/share")
+    assert first.status_code == 200, first.text
+    token = first.json()["share_token"]
+    assert len(token) >= 32
+    assert stack.client.post(f"/projects/{pid}/share").json()["share_token"] == token  # bleibt
+    assert stack.client.get(f"/projects/{pid}").json()["share_token"] == token
+
+    shared = stack.client.get(f"/share/{token}").json()
+    assert set(shared) == {"name", "status", "has_model", "updated_at"}  # keine ID, keine Dateien
+    assert shared["name"] == "Musterhaus"
+    assert shared["has_model"] is False
+    assert stack.client.get(f"/share/{token}/model").status_code == 404  # noch nicht fertig
+
+    model_key = f"projects/{pid}/generator/model.glb"
+    stack.portal.call(stack.storage.put_bytes, model_key, b"glTF-Modell")
+
+    async def finish() -> None:
+        async with stack.db.sessionmaker() as session, session.begin():
+            project = await session.get_one(Project, uuid.UUID(pid))
+            project.status = ProjectStatus.COMPLETED
+            project.artifacts = {**project.artifacts, "model_gltf": model_key}
+
+    stack.portal.call(finish)
+    assert stack.client.get(f"/share/{token}").json()["has_model"] is True
+    model = stack.client.get(f"/share/{token}/model")
+    assert model.status_code == 200
+    assert model.content == b"glTF-Modell"
+
+    assert stack.client.delete(f"/projects/{pid}/share").status_code == 204
+    assert stack.client.get(f"/share/{token}").status_code == 404
+    assert stack.client.get(f"/share/{token}/model").status_code == 404
+    assert stack.client.get("/share/erfunden").status_code == 404
+
+
 def _types(stack: Stack, pid: str) -> list[str]:
     return [e["type"] for e in stack.client.get(f"/projects/{pid}").json()["events"]]
 

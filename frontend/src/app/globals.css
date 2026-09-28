@@ -337,3 +337,97 @@ model-viewer {
 .muted {
   color: var(--muted);
 }
+
+/* Kunden-Link in der Projektverwaltung */
+.share-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 13px;
+}
+
+.share-link span {
+  color: var(--muted);
+}
+
+.share-link input {
+  flex: 1 1 280px;
+  min-width: 0;
+  font: inherit;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* Kundenansicht (/share/…) */
+.share-header {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.share-header .brand {
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+}
+
+.share-model {
+  display: grid;
+  gap: 12px;
+}
+
+.share-intro {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.share-intro p {
+  margin: 0;
+  flex: 1 1 320px;
+}
+
+/* Handy */
+@media (max-width: 640px) {
+  main {
+    padding: 16px 12px 40px;
+  }
+
+  h1 {
+    font-size: 22px;
+  }
+
+  .card {
+    padding: 14px;
+  }
+
+  model-viewer {
+    height: 62vh;
+  }
+
+  .viewer-controls,
+  .walk-controls {
+    left: 8px;
+    right: 8px;
+    top: 8px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  select.variant {
+    max-width: 100%;
+  }
+
+  .walk-hint {
+    width: calc(100% - 24px);
+    bottom: 16px;
+  }
+}

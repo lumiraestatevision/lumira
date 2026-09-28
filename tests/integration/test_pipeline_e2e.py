@@ -79,12 +79,19 @@ def test_finished_project_can_be_deleted_with_all_files(pipeline: Pipeline) -> N
     )
     detail = pipeline.wait_until_finished(project_id)
     assert detail["status"] == "completed", detail["error"]
-    assert pipeline.artifact(project_id, "model_gltf").content
+    model = pipeline.artifact(project_id, "model_gltf").content
+    assert model
+
+    # Kunden-Link: dasselbe Modell über den geheimen Schlüssel
+    token = pipeline.client.post(f"/projects/{project_id}/share").json()["share_token"]
+    assert pipeline.client.get(f"/share/{token}").json()["has_model"] is True
+    assert pipeline.client.get(f"/share/{token}/model").content == model
 
     assert pipeline.client.delete(f"/projects/{project_id}").status_code == 204
 
     assert pipeline.client.get(f"/projects/{project_id}").status_code == 404
     assert pipeline.client.get(f"/projects/{project_id}/artifacts/model_gltf").status_code == 404
+    assert pipeline.client.get(f"/share/{token}").status_code == 404  # Link mit gelöscht
     listed = [p["id"] for p in pipeline.client.get("/projects").json()]
     assert project_id not in listed
 
