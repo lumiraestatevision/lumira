@@ -9,7 +9,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from lumira_generator.logic.furnish import furnish, point_in_polygon
+from lumira_generator.logic.furnish import furnish, point_in_polygon, wall_outlines
+from lumira_generator.logic.railing import stair_railing
 from lumira_generator.logic.surfaces import describe
 from lumira_shared.models import (
     BLVResult,
@@ -166,7 +167,22 @@ def _stair_tread(
     return _step_surface(_floor_for(blv, room_type, variant))
 
 
+FALLBACK_RAILING = {"name": "Geländer Stahl", "color": "#3A3A3A"}
+
+
+def _railing_finish(blv: BLVResult, variant: str | None) -> dict[str, str]:
+    """Farbe des Treppengeländers laut LV (z. B. „pulverbeschichtet anthrazit“)."""
+    railings = [
+        m
+        for m in blv.materials_for(variant=variant)
+        if m.category is MaterialCategory.STAIRS and _RAILING.search(m.name.lower())
+    ]
+    return _color(railings[0] if railings else None, FALLBACK_RAILING)
+
+
 def _stairs(plan: FloorPlan, blv: BLVResult, variant: str | None) -> list[dict[str, Any]]:
+    walls = wall_outlines(plan)
+    finish = _railing_finish(blv, variant)
     return [
         {
             "id": stair.id,
@@ -178,6 +194,9 @@ def _stairs(plan: FloorPlan, blv: BLVResult, variant: str | None) -> list[dict[s
             "outline": [[p.x, p.y] for p in stair.outline],
             "floor_to_floor": stair.floor_to_floor_mm,
             "tread": _stair_tread(plan, stair, blv, variant),
+            # Geländer an den offenen Seiten (Treppenauge, freie Wange)
+            "railing": stair_railing(stair, walls),
+            "railing_finish": finish,
         }
         for stair in plan.stairs
     ]

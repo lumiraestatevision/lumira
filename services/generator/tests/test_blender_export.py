@@ -234,8 +234,8 @@ async def test_real_blender_exports_fbx_and_gltf(tmp_path: Path) -> None:
     assert glass["alphaMode"] == "BLEND"
     # Treppe: 16 Stufenblöcke, Auftritt im Bodenbelag des Raums, Decke darüber mit Öffnung
     assert (result.stats["stairs"], result.stats["steps"]) == (1, 16)
-    assert {"Stufe_treppe_00", "Stufe_treppe_15"} <= names
-    assert "Treppe" in materials
+    assert {"Stufe_treppe_00", "Stufe_treppe_15", "Gelaender_treppe"} <= names
+    assert {"Treppe", "Geländer"} <= materials
 
     def positions(node_name: str) -> list[dict]:
         node = next(n for n in gltf["nodes"] if n["name"] == node_name)

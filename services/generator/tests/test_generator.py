@@ -265,6 +265,36 @@ def test_stairs_use_lv_tread_or_the_floor_at_the_start() -> None:
     assert stair["tread"]["kind"] == "texture"
 
 
+def test_railing_on_open_sides_only() -> None:
+    """Geländer an den offenen Seiten der Treppe; Antritt und Austritt bleiben frei."""
+    plan = _plan()
+    plan.stairs = [_stair()]  # x 500–1500, Lauf nach +y von y 250 bis 2750
+
+    [stair] = build_scene(plan, _blv(plan.project_id))["stairs"]
+
+    railing = stair["railing"]
+    posts = railing["posts"]
+    xs = sorted({round(p[0]) for p in posts})
+    assert xs == [500, 1500]  # beide Wangen frei
+    # nichts vor dem Antritt / nach dem Austritt (keine Stäbe auf den Querkanten)
+    assert min(p[1] for p in posts) > 250
+    assert max(p[1] for p in posts) < 2750
+    heights = sorted({p[2] for p in posts})
+    assert heights[0] == pytest.approx(275)
+    assert heights[-1] == pytest.approx(2_750)
+    # je Seite ein durchgehender Handlauf: n Stäbe -> n - 1 Stücke
+    per_side = len(posts) // 2
+    assert len(railing["rails"]) == 2 * (per_side - 1)
+    assert stair["railing_finish"]["color"]
+
+    # Wand an der linken Wange (x 300–500) → nur noch rechts ein Geländer
+    plan.walls.append(
+        Wall(id="w2", start=Point2D(x=400, y=0), end=Point2D(x=400, y=3_000), thickness_mm=200)
+    )
+    [stair] = build_scene(plan, _blv(plan.project_id))["stairs"]
+    assert sorted({round(p[0]) for p in stair["railing"]["posts"]}) == [1500]
+
+
 def test_tiled_stairs_get_solid_step_plates() -> None:
     """Muster1-LV: „Treppenbelag Feinsteinzeug anthrazit“ – Stufen ohne Fugenraster."""
     plan = _plan()

@@ -168,7 +168,8 @@ dafür fehlt bisher die Zielplattform.
   NVIDIA-GPU 512 Samples (~1 min, `COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml`
   in `.env`). Ausstattungsvarianten aus dem LV (z. B. „Parkett statt Estrich“) sind in der
   3D-Vorschau und im Rundgang umschaltbar (glTF `KHR_materials_variants`; nur Varianten, die im
-  Grundriss etwas ändern). Noch nicht: Geländer, Obergeschoss.
+  Grundriss etwas ändern). Treppengeländer an den offenen Seiten (Stäbe + mitlaufender
+  Handlauf, Farbe laut LV). Noch nicht: Obergeschoss (braucht den OG-Plan).
 - **Rundgang** („Rundgang starten“ beim Projekt): frei durchs Modell gehen – PC mit Maus und
   W/A/S/D, Handy per Wischen, VR-Brille per WebXR (Teleport mit dem Abzug, linker Stick gehen,
   rechter Stick drehen). Kollision mit Wänden und Möbeln, Treppen begehbar, eingebranntes Licht.

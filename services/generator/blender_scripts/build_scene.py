@@ -36,7 +36,7 @@ import time
 import bmesh
 import bpy
 import numpy as np
-from mathutils import Matrix
+from mathutils import Matrix, Vector
 
 MM = 0.001  # Szene in Metern, Eingabe in Millimetern
 EXPORT_TEXTURE_PX = 1024  # Texturen im GLB (Browser/VR-Brille) – Quelle ist 2K
@@ -764,7 +764,53 @@ def build_stair(stair):
         mesh.materials.append(side_mat)
         for polygon in mesh.polygons:
             polygon.material_index = 0 if polygon.normal.z > 0.99 else 1
+    build_railing(stair)
     return len(stair["steps"])
+
+
+RAIL_POST = 0.02  # Stab 20 x 20 mm
+RAIL_RADIUS = 0.022  # Handlauf Ø 44 mm
+
+
+def build_railing(stair):
+    """Geländer an den offenen Seiten: Stäbe auf den Stufen, Handlauf steigt mit der Treppe."""
+    railing = stair.get("railing")
+    if not railing or not railing["posts"]:
+        return None
+    finish = stair.get("railing_finish") or {"color": "#3A3A3A"}
+    steel = metal("Geländer", finish["color"], 0.4)
+    height = railing["height"] * MM
+    bm = bmesh.new()
+    tops = []
+    for x, y, z in railing["posts"]:
+        base = Vector((x * MM, y * MM, z * MM))
+        matrix = Matrix.Translation(base + Vector((0, 0, height / 2))) @ Matrix.Diagonal(
+            (RAIL_POST, RAIL_POST, height, 1.0)
+        )
+        bmesh.ops.create_cube(bm, size=1.0, matrix=matrix)
+        tops.append(base + Vector((0, 0, height)))
+    for a, b in railing["rails"]:
+        start, end = tops[a], tops[b]
+        direction = end - start
+        # Handlauf etwas über die Stabköpfe verlängern: stoßfrei an Ecken und Wendelstufen
+        rotation = direction.to_track_quat("Z", "Y").to_matrix().to_4x4()
+        matrix = Matrix.Translation((start + end) / 2) @ rotation
+        bmesh.ops.create_cone(
+            bm,
+            cap_ends=True,
+            segments=12,
+            radius1=RAIL_RADIUS,
+            radius2=RAIL_RADIUS,
+            depth=direction.length + RAIL_RADIUS,
+            matrix=matrix,
+        )
+    mesh = bpy.data.meshes.new(f"Gelaender_{stair['id']}")
+    bm.to_mesh(mesh)
+    bm.free()
+    mesh.materials.append(steel)
+    obj = bpy.data.objects.new(f"Gelaender_{stair['id']}", mesh)
+    bpy.context.scene.collection.objects.link(obj)
+    return obj
 
 
 # ------------------------------------------------------------------ Einrichtung
