@@ -165,8 +165,10 @@ dafür fehlt bisher die Zielplattform.
 
 - **3D-Modell**: Wände, Böden mit echten Materialien aus dem LV (Holz als Fototextur in
   realer Größe, Fliesen im LV-Format, Putz), Türen (Zarge, geöffnetes Blatt), Fenster (Rahmen,
-  Glas), Decken mit Leuchten, Küche und Sanitär laut LV, lose Möbel regelbasiert platziert
-  (in der Vorschau per Knopf ausblendbar), Treppen als massive Stufen (Belag laut LV) mit
+  Glas), Decken mit Leuchten, Einrichtung wie im Plan gezeichnet (Bett, Schränke, Küchenzeile,
+  Theke, Esstisch mit Stühlen, Sofa, Wanne, WC … – Lage, Größe und Ausrichtung aus dem Plan;
+  Räume ohne gezeichnete Möbel regelbasiert, fehlende Hauptmöbel werden ergänzt; lose Möbel in
+  der Vorschau per Knopf ausblendbar), Treppen als massive Stufen (Belag laut LV) mit
   Deckenöffnung. Licht ist eingebrannt (Tageslicht durch die Fenster + Deckenleuchten mit
   indirektem Licht, Lightmap für die Raumhülle): auf der CPU 64 Samples (~4 min), mit
   NVIDIA-GPU 512 Samples (~1 min, `COMPOSE_FILE=docker-compose.yml:docker-compose.gpu.yml`

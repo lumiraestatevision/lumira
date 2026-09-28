@@ -14,6 +14,7 @@ from lumira_shared.models import (
     BLVResult,
     EquipmentVariant,
     FloorPlan,
+    Furniture,
     Material,
     MaterialCategory,
     Opening,
@@ -272,3 +273,79 @@ def test_open_kitchen_gets_a_counter_instead_of_a_run_in_the_opening() -> None:
     polygon = _square(kitchen)
     assert rect_in_polygon(_rect(counter), polygon)
     assert not overlaps(_rect(counter), _rect(run))
+
+
+# ------------------------------------------------------------------ Möbel aus dem Plan
+def test_drawn_furniture_replaces_rules() -> None:
+    """Im Plan gezeichnetes Bett: genau dort, so groß, so ausgerichtet – keine Regel-Möbel."""
+    plan = _plan(4_000, 4_000, RoomType.BEDROOM, [("unten", OpeningType.DOOR, 300, 900, 0)])
+    plan.furniture = [
+        Furniture(
+            id="f0",
+            kind="bed_double",
+            center=Point2D(x=1_900, y=2_980),
+            width_mm=1_600,
+            depth_mm=2_000,
+            angle_deg=-90,
+            room_id="r",
+        )
+    ]
+
+    items = furnish(plan, _blv())
+
+    [bed] = items
+    assert (bed["kind"], bed["x"], bed["y"], bed["w"], bed["d"]) == (
+        "bed_double",
+        1_900,
+        2_980,
+        1_600,
+        2_000,
+    )
+    assert bed["angle"] == pytest.approx(-math.pi / 2, abs=1e-4)
+    assert bed["loose"] is True
+
+
+def test_rules_add_missing_main_furniture() -> None:
+    """Wohnzimmer mit gezeichnetem Esstisch, aber ohne erkanntes Sofa: das Sofa kommt dazu
+    und überschneidet den Tisch nicht."""
+    plan = _plan(6_000, 4_500, RoomType.LIVING, [("unten", OpeningType.DOOR, 300, 900, 0)])
+    plan.furniture = [
+        Furniture(
+            id="f0",
+            kind="dining_table",
+            center=Point2D(x=4_500, y=3_300),
+            width_mm=1_600,
+            depth_mm=900,
+            angle_deg=90,
+            room_id="r",
+        )
+    ]
+
+    items = furnish(plan, _blv())
+
+    kinds = Counter(i["kind"] for i in items)
+    assert kinds["dining_table"] == 1  # nur der gezeichnete
+    assert kinds["sofa"] == 1
+    table = next(i for i in items if i["kind"] == "dining_table")
+    sofa = next(i for i in items if i["kind"] == "sofa")
+    assert not overlaps(_rect(table), _rect(sofa))
+
+
+def test_drawn_kitchen_gets_no_upper_cabinets_below_a_window() -> None:
+    plan = _plan(4_000, 3_000, RoomType.KITCHEN, [("oben", OpeningType.WINDOW, 1_400, 1_200, 900)])
+    plan.furniture = [
+        Furniture(
+            id="k",
+            kind="kitchen",
+            center=Point2D(x=2_000, y=2_690),
+            width_mm=3_000,
+            depth_mm=620,
+            angle_deg=-90,
+            room_id="r",
+        )
+    ]
+
+    [kitchen] = furnish(plan, _blv())
+
+    assert kitchen["upper"] is False
+    assert kitchen["loose"] is False

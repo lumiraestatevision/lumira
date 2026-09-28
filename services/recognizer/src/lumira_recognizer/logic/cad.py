@@ -23,25 +23,30 @@ from __future__ import annotations
 
 import math
 import re
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass
+from itertools import pairwise
 from typing import Literal
 
 import cv2
 import numpy as np
 
-from lumira_recognizer.logic.outdoor import find_outdoor
+from lumira_recognizer.logic.furniture import find_furniture
+from lumira_recognizer.logic.outdoor import find_outdoor, hatch_lines
 from lumira_recognizer.logic.stairs import find_stairs
 from lumira_shared.models import (
     Column,
     DoorSwing,
     FilledArea,
     FloorPlan,
+    Furniture,
     Opening,
     OpeningType,
     ParsedPlan,
     Point2D,
     Room,
+    Segment,
+    Stair,
     Stroke,
     TextItem,
     Wall,
@@ -371,6 +376,7 @@ def apertures(gaps: list[Gap]) -> list[Aperture]:
 class DoorArc:
     swing: DoorSwing  # Anschlag: Band am Anfang (LEFT) oder Ende (RIGHT) der Öffnung
     opens_to: Literal["left", "right"]  # Aufschlagseite relativ zur Richtung Anfang → Ende
+    curve: int = -1  # Index des Aufschlagbogens in ParsedPlan.curves
 
 
 def _arc_error(aperture: Aperture, curve: Stroke) -> tuple[float, DoorArc] | None:
@@ -417,6 +423,7 @@ def assign_door_arcs(found: list[Aperture], curves: list[Stroke]) -> dict[int, D
     used: set[int] = set()
     for _, i, j, door in sorted(candidates, key=lambda c: c[0]):
         if i not in doors and j not in used:
+            door.curve = j
             doors[i] = door
             used.add(j)
     return doors
@@ -577,6 +584,34 @@ def _label(polygon: list[Point2D], texts: list[TextItem]) -> str | None:
     return " ".join(t.text for t in inside) or None
 
 
+# ------------------------------------------------------------------ Einrichtung
+def _furniture(
+    parsed: ParsedPlan, rooms: list[Room], door_arcs: set[int], stairs: list[Stair]
+) -> list[Furniture]:
+    """Gezeichnete Möbel: alle Linien und Kurven ohne Schraffuren (Fliesen, Dielen) und ohne
+    Türaufschläge (Bogen + Türblatt schließen sonst mit der Wand eine Fläche ein)."""
+    curves = [
+        np.array([[p.x, p.y] for p in c.points])
+        for j, c in enumerate(parsed.curves)
+        if j not in door_arcs
+    ]
+    edges = [
+        Segment(start=Point2D(x=a[0], y=a[1]), end=Point2D(x=b[0], y=b[1]))
+        for c in curves
+        if len(c) == 2
+        for a, b in pairwise(c.tolist())
+    ]
+    lines = [*parsed.segments, *edges]
+    hatch = hatch_lines(lines).lines
+    kept = [
+        np.array([[s.start.x, s.start.y], [s.end.x, s.end.y]])
+        for i, s in enumerate(lines)
+        if i not in hatch
+    ]
+    outlines = [np.array([[p.x, p.y] for p in s.outline]) for s in stairs]
+    return find_furniture(rooms, kept, [c for c in curves if len(c) > 2], parsed.texts, outlines)
+
+
 # ------------------------------------------------------------------ Gesamt
 def recognize_cad(parsed: ParsedPlan) -> FloorPlan | None:
     """Liefert None, wenn der Plan keine gefüllten Wände hat (→ anderes Verfahren nutzen)."""
@@ -681,6 +716,7 @@ def recognize_cad(parsed: ParsedPlan) -> FloorPlan | None:
     outdoor = [r for r in rooms if r.outdoor]
 
     stairs = find_stairs(parsed.segments, parsed.curves, [p.points for p in pieces])
+    furniture = _furniture(parsed, rooms, {d.curve for d in doors.values()}, stairs)
 
     counts = defaultdict(int)
     for opening in openings:
@@ -695,6 +731,7 @@ def recognize_cad(parsed: ParsedPlan) -> FloorPlan | None:
         rooms=rooms,
         stairs=stairs,
         columns=columns,
+        furniture=furniture,
         metadata={
             "recognizer": "cad-fills",
             "wall_color": color,
@@ -707,6 +744,10 @@ def recognize_cad(parsed: ParsedPlan) -> FloorPlan | None:
             + (f", {len(columns)} Stützen" if columns else "")
             or "keine",
             "openings": ", ".join(f"{k}: {v}" for k, v in sorted(counts.items())) or "keine",
+            "furniture": ", ".join(
+                f"{k}: {v}" for k, v in sorted(Counter(f.kind for f in furniture).items())
+            )
+            or "keine",
             "stairs": ", ".join(f"{len(s.steps)} Stufen à {s.rise_mm:g} mm" for s in stairs)
             or "keine",
             "scale": f"1:{parsed.plan_scale:g}" if parsed.plan_scale else "unbekannt",

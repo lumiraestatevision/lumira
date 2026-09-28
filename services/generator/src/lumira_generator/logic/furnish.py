@@ -9,6 +9,8 @@ Regelbasiert, ohne Lernverfahren – plausibel, keine Innenarchitektur:
    gültig, wenn frei von Sperren, ganz im Raum und ohne Überschneidung.
 4. Freistehend (Esstisch, Couchtisch): Rasterpunkte im Raum, gleiche Prüfungen.
 
+Sind im Plan Möbel gezeichnet (FloorPlan.furniture), bekommt der Raum genau diese.
+
 Ausgabe je Stück: Mittelpunkt, Blickrichtung (Front zeigt in den Raum), Maße in mm,
 ``loose`` (lose Möbel – im Viewer ausblendbar) und ``kind`` für das Blender-Skript.
 """
@@ -365,19 +367,7 @@ class Layout:
         self, kind: str, rect: Rect, *, loose: bool, extra: dict[str, Any] | None = None
     ) -> Rect:
         self.placed.append(rect)
-        self.items.append(
-            {
-                "kind": kind,
-                "x": round(rect.cx, 1),
-                "y": round(rect.cy, 1),
-                "angle": round(rect.angle, 5),
-                "w": rect.w,
-                "d": rect.d,
-                "h": SIZES[kind][2],
-                "loose": loose,
-                **(extra or {}),
-            }
-        )
+        self.items.append(_item(kind, rect, loose=loose, extra=extra))
         return rect
 
     def against_wall(
@@ -642,7 +632,96 @@ def _furnish_wet(layout: Layout, room: Room, lv: set[str]) -> None:
             layout.add(kind, spot, loose=False)
 
 
+# Fest eingebaut (bleibt beim Ausblenden der Möbel stehen)
+FIXED = {
+    "kitchen",
+    "kitchen_counter",
+    "wc",
+    "washbasin",
+    "handbasin",
+    "shower",
+    "bathtub",
+    "washing_machine",
+}
+UPPER_WINDOW_REACH = 400.0  # Fenster so nah an der Küchenrückwand → keine Oberschränke
+
+
+def _window_centres(plan: FloorPlan) -> list[tuple[float, float]]:
+    centres = []
+    for opening in plan.openings:
+        if opening.type is not OpeningType.WINDOW:
+            continue
+        wall = plan.wall(opening.wall_id)
+        length = wall.length_mm or 1.0
+        t = (opening.offset_mm + opening.width_mm / 2) / length
+        centres.append(
+            (
+                wall.start.x + (wall.end.x - wall.start.x) * t,
+                wall.start.y + (wall.end.y - wall.start.y) * t,
+            )
+        )
+    return centres
+
+
+def _window_behind(rect: Rect, windows: list[tuple[float, float]]) -> bool:
+    (sx, sy), (fx, fy) = rect.axes()
+    bx, by = rect.cx - fx * rect.d / 2, rect.cy - fy * rect.d / 2  # Mitte der Rückseite
+    for wx, wy in windows:
+        along = (wx - bx) * sx + (wy - by) * sy
+        across = (wx - bx) * fx + (wy - by) * fy
+        if abs(along) <= rect.w / 2 and -UPPER_WINDOW_REACH <= across <= 100:
+            return True
+    return False
+
+
+def plan_furniture(plan: FloorPlan, kitchen_color: str) -> dict[str, list[dict[str, Any]]]:
+    """Im Plan gezeichnete Möbel je Raum – Lage, Maße und Blickrichtung wie gezeichnet, Höhe
+    und Aussehen wie bei der Regel-Einrichtung. Zum Schreibtisch kommt ein Bürostuhl."""
+    windows = _window_centres(plan)
+    rooms: dict[str, list[dict[str, Any]]] = {}
+    for item in plan.furniture:
+        if item.kind not in SIZES or item.room_id is None:
+            continue
+        rect = Rect(
+            item.center.x, item.center.y, math.radians(item.angle_deg), item.width_mm, item.depth_mm
+        )
+        extra: dict[str, Any] = {}
+        if item.kind == "kitchen":
+            extra = {"color": kitchen_color, "upper": not _window_behind(rect, windows)}
+        elif item.kind == "kitchen_counter":
+            extra = {"color": kitchen_color}
+        placed = rooms.setdefault(item.room_id, [])
+        placed.append(_item(item.kind, rect, loose=item.kind not in FIXED, extra=extra))
+        if item.kind == "desk":
+            chair = rect.moved(forward=rect.d / 2 + 250)
+            placed.append(
+                _item(
+                    "office_chair",
+                    Rect(chair.cx, chair.cy, rect.angle + math.pi, 600, 600),
+                    loose=True,
+                )
+            )
+    return rooms
+
+
+def _item(
+    kind: str, rect: Rect, *, loose: bool, extra: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    return {
+        "kind": kind,
+        "x": round(rect.cx, 1),
+        "y": round(rect.cy, 1),
+        "angle": round(rect.angle, 5),
+        "w": rect.w,
+        "d": rect.d,
+        "h": SIZES[kind][2],
+        "loose": loose,
+        **(extra or {}),
+    }
+
+
 def furnish(plan: FloorPlan, blv: BLVResult) -> list[dict[str, Any]]:
+    """Einrichtung je Raum: die im Plan gezeichneten Möbel, sonst regelbasiert."""
     spans = opening_spans(plan)
     lv_sanitary = _sanitary_from_lv(blv)
     kitchens = [
@@ -651,6 +730,7 @@ def furnish(plan: FloorPlan, blv: BLVResult) -> list[dict[str, Any]]:
     kitchen_color = kitchens[0].color_hex if kitchens and kitchens[0].color_hex else "#F2F1EC"
     stairs = stair_obstacles(plan)
     walls = wall_outlines(plan)
+    drawn = plan_furniture(plan, kitchen_color)
     items: list[dict[str, Any]] = []
     for room in plan.rooms:
         if room.outdoor:  # Terrasse/Balkon: (noch) keine Gartenmöbel
@@ -660,29 +740,55 @@ def furnish(plan: FloorPlan, blv: BLVResult) -> list[dict[str, Any]]:
         if not layout.edges:
             continue
         layout.placed.extend(stairs)
-        label = (room.label or "").lower()
-        match room.room_type:
-            case RoomType.LIVING | RoomType.DINING:
-                _furnish_living(
-                    layout, dining="essen" in label or room.room_type is RoomType.DINING
-                )
-            case RoomType.BEDROOM:
-                _furnish_bedroom(layout, double=True)
-            case RoomType.CHILD:
-                _furnish_bedroom(layout, double=False)
-            case RoomType.OFFICE:
-                _furnish_office(layout)
-            case RoomType.KITCHEN:
-                _furnish_kitchen(layout, kitchen_color)
-            case RoomType.BATHROOM | RoomType.WC:
-                _furnish_wet(layout, room, lv_sanitary)
-            # Flure bleiben (noch) leer; Garderobe o. Ä. folgt mit den im Plan gezeichneten Möbeln.
-            case RoomType.UTILITY:
-                spot = layout.against_wall("washing_machine", corner=True, clearance=600)
-                if spot:
-                    layout.add("washing_machine", spot, loose=False)
-            case _:
-                pass
-        for n, item in enumerate(layout.items):
+        planned = drawn.get(room.id, [])
+        # Gezeichnete Möbel sind gesetzt; die Regeln füllen nur fehlende Hauptmöbel auf (z. B.
+        # ein Ecksofa, das die Erkennung nicht sicher einordnen konnte)
+        layout.placed.extend(Rect(i["x"], i["y"], i["angle"], i["w"], i["d"]) for i in planned)
+        _furnish_by_rules(layout, room, lv_sanitary, kitchen_color)
+        rule_items = layout.items
+        if planned:
+            present = {i["kind"] for i in planned}
+            missing = ESSENTIAL.get(room.room_type, set()) - present
+            if "bed_single" in present:
+                missing.discard("bed_double")
+            rule_items = [i for i in layout.items if i["kind"] in missing]
+        for n, item in enumerate([*planned, *rule_items]):
             items.append({"id": f"{room.id}_{item['kind']}_{n}", "room_id": room.id, **item})
     return items
+
+
+# Ohne diese wirkt ein Raum unfertig – fehlen sie unter den gezeichneten Möbeln, ergänzen die Regeln
+ESSENTIAL: dict[RoomType, set[str]] = {
+    RoomType.LIVING: {"sofa"},
+    RoomType.BEDROOM: {"bed_double"},
+    RoomType.CHILD: {"bed_single"},
+    RoomType.KITCHEN: {"kitchen"},
+    RoomType.BATHROOM: {"wc", "washbasin"},
+    RoomType.WC: {"wc", "handbasin"},
+}
+
+
+def _furnish_by_rules(
+    layout: Layout, room: Room, lv_sanitary: set[str], kitchen_color: str
+) -> None:
+    label = (room.label or "").lower()
+    match room.room_type:
+        case RoomType.LIVING | RoomType.DINING:
+            _furnish_living(layout, dining="essen" in label or room.room_type is RoomType.DINING)
+        case RoomType.BEDROOM:
+            _furnish_bedroom(layout, double=True)
+        case RoomType.CHILD:
+            _furnish_bedroom(layout, double=False)
+        case RoomType.OFFICE:
+            _furnish_office(layout)
+        case RoomType.KITCHEN:
+            _furnish_kitchen(layout, kitchen_color)
+        case RoomType.BATHROOM | RoomType.WC:
+            _furnish_wet(layout, room, lv_sanitary)
+        # Flure bleiben (noch) leer; Garderobe o. Ä. folgt mit den im Plan gezeichneten Möbeln.
+        case RoomType.UTILITY:
+            spot = layout.against_wall("washing_machine", corner=True, clearance=600)
+            if spot:
+                layout.add("washing_machine", spot, loose=False)
+        case _:
+            pass

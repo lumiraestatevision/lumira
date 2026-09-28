@@ -154,6 +154,20 @@ class Column(LumiraModel):
     confidence: Confidence = 1.0
 
 
+class Furniture(LumiraModel):
+    """Im Plan gezeichnetes Möbel/Ausstattungsstück. ``kind`` wie im Generator (``bed_double``,
+    ``wardrobe``, ``kitchen``, ``bathtub`` …); ``angle_deg``: Richtung, in die die Front zeigt."""
+
+    id: str = Field(default_factory=lambda: new_id("furniture"))
+    kind: str = Field(min_length=1)
+    center: Point2D
+    width_mm: float = Field(gt=0, description="entlang der Front")
+    depth_mm: float = Field(gt=0)
+    angle_deg: float = 0.0
+    room_id: str | None = None
+    confidence: Confidence = 1.0
+
+
 class FloorPlan(LumiraModel):
     project_id: UUID
     source_key: str = Field(description="S3-Key der Originaldatei")
@@ -167,6 +181,7 @@ class FloorPlan(LumiraModel):
     rooms: list[Room] = Field(default_factory=list)
     stairs: list[Stair] = Field(default_factory=list)
     columns: list[Column] = Field(default_factory=list)
+    furniture: list[Furniture] = Field(default_factory=list)
     metadata: dict[str, str] = Field(default_factory=dict)
 
     @model_validator(mode="after")
@@ -177,6 +192,7 @@ class FloorPlan(LumiraModel):
             + [r.id for r in self.rooms]
             + [s.id for s in self.stairs]
             + [c.id for c in self.columns]
+            + [f.id for f in self.furniture]
         )
         duplicates = sorted(i for i, n in Counter(all_ids).items() if n > 1)
         if duplicates:
