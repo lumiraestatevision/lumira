@@ -168,7 +168,7 @@ importers:
     dependencies:
       '@google/model-viewer':
         specifier: ^4.3.1
-        version: 4.3.1(three@0.183.2)
+        version: 4.3.1(three@0.186.1)
       next:
         specifier: ^16.3.6
         version: 16.3.6(@types/node@24.13.6)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
@@ -179,8 +179,8 @@ importers:
         specifier: ^19.3.0
         version: 19.3.0(react@19.3.0)
       three:
-        specifier: ^0.183.0
-        version: 0.183.2
+        specifier: ^0.186.1
+        version: 0.186.1
     devDependencies:
       '@types/node':
         specifier: ^24.13.6
@@ -192,8 +192,8 @@ importers:
         specifier: ^19.3.0
         version: 19.3.0(@types/react@19.3.0)
       '@types/three':
-        specifier: ~0.183.1
-        version: 0.183.1
+        specifier: ~0.186.0
+        version: 0.186.0
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
@@ -460,17 +460,14 @@ packages:
   '@types/stats.js@0.17.4':
     resolution: {integrity: sha512-jIBvWWShCvlBqBNIZt0KAshWpvSjhkwkEu4ZUcASoAvhmrgAUI2t1dXrjSL4xXVLB4FznPrIsX3nKXFl/Dt4vA==}
 
-  '@types/three@0.183.1':
-    resolution: {integrity: sha512-f2Pu5Hrepfgavttdye3PsH5RWyY/AvdZQwIVhrc4uNtvF7nOWJacQKcoVJn0S4f0yYbmAE6AR+ve7xDcuYtMGw==}
+  '@types/three@0.186.0':
+    resolution: {integrity: sha512-mxYSBpDC+D0pLfSP6sW4WZTcT+nrtmZcimMqnVmy36Hte3XpeYSrvgg4TRdaM1GemGog1AWzI5qL2VoIfMXbJQ==}
 
   '@types/trusted-types@2.0.7':
     resolution: {integrity: sha512-ScaPdn1dQczgbl0QFTeTOmVHFULt394XJgOQNoyVhZ6r2vLnMLJfBPd53SB52T/3G36VI1/g2MZaX0cwDuXsfw==}
 
   '@types/webxr@0.5.24':
     resolution: {integrity: sha512-h8fgEd/DpoS9CBrjEQXR+dIDraopAEfu4wYVNY2tEPwk60stPWhvZMf4Foo5FakuQ7HFZoa8WceaWFervK2Ovg==}
-
-  '@webgpu/types@0.1.74':
-    resolution: {integrity: sha512-lgiI4hbuLcI9unnm2cL/tvCaQU45dp0xcLWJh5uB/9MBGvIA4F8XIk7nSiBeg+K4xWGYwgZKn80LmERI5CxoTA==}
 
   baseline-browser-mapping@2.11.25:
     resolution: {integrity: sha512-gMmEShwwq7FJqMwvfRwvCl00v4kN+KOfJqXn+f4nrufak5gNHJOksd/60Dvjuz7sI8Y5WiSFBa8FEYr+zoyqCw==}
@@ -511,8 +508,8 @@ packages:
   lit@3.3.3:
     resolution: {integrity: sha512-fycuvZg/hkpozL00lm1pEJH5nN/lr9ZXd6mJI2HSN4+Bzc+LDNdEApJ6HFbPkdFNHLvOplIIuJvxkS4XUxqirw==}
 
-  meshoptimizer@1.0.1:
-    resolution: {integrity: sha512-Vix+QlA1YYT3FwmBBZ+49cE5y/b+pRrcXKqGpS5ouh33d3lSp2PoTpCw19E0cKDFWalembrHnIaZetf27a+W2g==}
+  meshoptimizer@1.1.1:
+    resolution: {integrity: sha512-oRFNWJRDA/WTrVj7NWvqa5HqE1t9MYDj2VaWirQCzCCrAd2GHrqR/sQezCxiWATPNlKTcRaPRHPJwIRoPBAp5g==}
 
   nanoid@3.3.19:
     resolution: {integrity: sha512-Y2tUNy4ouw6tq5oDSKeQYGOyhkUBhNOcGV/02KC+6kd9eDGqdZd++mjMiIDilrBYvjEnCYvVtsuHCuP+okSfug==}
@@ -593,8 +590,8 @@ packages:
       babel-plugin-macros:
         optional: true
 
-  three@0.183.2:
-    resolution: {integrity: sha512-di3BsL2FEQ1PA7Hcvn4fyJOlxRRgFYBpMTcyOgkwJIaDOdJMebEFPA+t98EvjuljDx4hNulAGwF6KIjtwI5jgQ==}
+  three@0.186.1:
+    resolution: {integrity: sha512-blFeqb49wRCSGUGj7gtpfnSGHy2lwDk94RhUmS1c/hTby70kvChbWpkJ4Pm1390LqzzvTmzgXKHPEafJwCb8jA==}
 
   tslib@2.8.1:
     resolution: {integrity: sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w==}
@@ -616,11 +613,11 @@ snapshots:
       tslib: 2.8.1
     optional: true
 
-  '@google/model-viewer@4.3.1(three@0.183.2)':
+  '@google/model-viewer@4.3.1(three@0.186.1)':
     dependencies:
-      '@monogrid/gainmap-js': 3.4.0(three@0.183.2)
+      '@monogrid/gainmap-js': 3.4.0(three@0.186.1)
       lit: 3.3.3
-      three: 0.183.2
+      three: 0.186.1
 
   '@img/colour@1.1.0':
     optional: true
@@ -735,10 +732,10 @@ snapshots:
     dependencies:
       '@lit-labs/ssr-dom-shim': 1.6.0
 
-  '@monogrid/gainmap-js@3.4.0(three@0.183.2)':
+  '@monogrid/gainmap-js@3.4.0(three@0.186.1)':
     dependencies:
       promise-worker-transferable: 1.0.4
-      three: 0.183.2
+      three: 0.186.1
 
   '@next/env@16.3.6': {}
 
@@ -786,21 +783,18 @@ snapshots:
 
   '@types/stats.js@0.17.4': {}
 
-  '@types/three@0.183.1':
+  '@types/three@0.186.0':
     dependencies:
       '@dimforge/rapier3d-compat': 0.12.0
       '@tweenjs/tween.js': 23.1.3
       '@types/stats.js': 0.17.4
       '@types/webxr': 0.5.24
-      '@webgpu/types': 0.1.74
       fflate: 0.8.3
-      meshoptimizer: 1.0.1
+      meshoptimizer: 1.1.1
 
   '@types/trusted-types@2.0.7': {}
 
   '@types/webxr@0.5.24': {}
-
-  '@webgpu/types@0.1.74': {}
 
   baseline-browser-mapping@2.11.25: {}
 
@@ -839,7 +833,7 @@ snapshots:
       lit-element: 4.2.2
       lit-html: 3.3.3
 
-  meshoptimizer@1.0.1: {}
+  meshoptimizer@1.1.1: {}
 
   nanoid@3.3.19: {}
 
@@ -934,7 +928,7 @@ snapshots:
       client-only: 0.0.1
       react: 19.3.0
 
-  three@0.183.2: {}
+  three@0.186.1: {}
 
   tslib@2.8.1: {}
 
