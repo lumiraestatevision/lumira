@@ -173,7 +173,8 @@ dafür fehlt bisher die Zielplattform.
   in `.env`). Ausstattungsvarianten aus dem LV (z. B. „Parkett statt Estrich“) sind in der
   3D-Vorschau und im Rundgang umschaltbar (glTF `KHR_materials_variants`; nur Varianten, die im
   Grundriss etwas ändern). Treppengeländer an den offenen Seiten (Stäbe + mitlaufender
-  Handlauf, Farbe laut LV). Noch nicht: Obergeschoss (braucht den OG-Plan).
+  Handlauf, Farbe laut LV). Terrassen/Balkone mit Belag laut LV (sonst Holzdielen), überdacht
+  mit Dach auf Stützen, begehbar im Rundgang. Noch nicht: Obergeschoss (braucht den OG-Plan).
 - **Rundgang** („Rundgang starten“ beim Projekt): frei durchs Modell gehen – PC mit Maus und
   W/A/S/D, Handy per Wischen, VR-Brille per WebXR (Teleport mit dem Abzug, linker Stick gehen,
   rechter Stick drehen). Kollision mit Wänden und Möbeln, Treppen begehbar, eingebranntes Licht.
@@ -185,9 +186,11 @@ dafür fehlt bisher die Zielplattform.
 - **Erkennung**: CAD-PDFs mit gefüllten Wänden (üblicher Export von Archicad, Allplan & Co.)
   werden exakt ausgelesen – Wände mit echtem Grundriss, Fenster, Türen (über den Aufschlagbogen),
   Durchgänge, Räume mit Beschriftung, Treppen (gerade und gewendelt, Laufrichtung über
-  Antrittssymbol/Pfeil; Steigung aus 2,75 m Geschosshöhe angenommen). Pläne ohne gefüllte
-  Wände: einfaches Linienverfahren mit Platzhalter-Öffnungen. Terrassen und Balkone werden
-  noch nicht als Räume erkannt.
+  Antrittssymbol/Pfeil; Steigung aus 2,75 m Geschosshöhe angenommen), Terrassen und Balkone
+  (Fläche um die Beschriftung außerhalb der Wände, Dielen-Schraffur wird übergangen, „überdacht“
+  → Dach, Stützen aus den Kreuz-Quadraten). Die Wandfarbe wird an der Form erkannt (grau,
+  orange …), der Maßstab an den Flächenangaben geprüft. Pläne ohne gefüllte Wände: einfaches
+  Linienverfahren mit Platzhalter-Öffnungen.
   KI-Erkennung gescannter Pläne ist ein Stub (die GPU wird dafür vorbereitet, aber noch nicht genutzt).
 - **Raumklassifikation ohne Beschriftung**: Modell mit synthetischen Referenzdaten.
 - **Farben**: Ohne Farbangabe im LV werden Farben aus Material/Kategorie angenommen und als

@@ -20,6 +20,7 @@ from lumira_generator.logic.blender_runner import BakeOptions, run_blender
 from lumira_generator.logic.scene import build_scene
 from lumira_shared.models import (
     BLVResult,
+    Column,
     DoorSwing,
     EquipmentVariant,
     FloorPlan,
@@ -152,6 +153,18 @@ def _scene() -> dict:
         rooms=[
             Room(id="wohnen", polygon=_rect(0, 0, 6_000, 8_000), room_type=RoomType.LIVING),
             Room(id="bad", polygon=_rect(6_000, 0, 10_000, 8_000), room_type=RoomType.BATHROOM),
+            # überdachte Terrasse an der Außenwand, Stützen am äußeren Rand
+            Room(
+                id="terrasse",
+                polygon=_rect(10_120, 0, 12_500, 8_000),
+                room_type=RoomType.BALCONY,
+                outdoor=True,
+                roofed=True,
+            ),
+        ],
+        columns=[
+            Column(id=f"c{n}", center=Point2D(x=12_430, y=y), size_mm=140)
+            for n, y in enumerate((70, 7_930))
         ],
         # gerade Treppe im Wohnen: 16 Auftritte à 250 mm
         stairs=[
@@ -215,7 +228,8 @@ async def test_real_blender_exports_fbx_and_gltf(tmp_path: Path) -> None:
     )
 
     assert result.stats["walls"] == 7
-    assert result.stats["rooms"] == 2
+    assert result.stats["rooms"] == 3
+    assert (result.stats["outdoor"], result.stats["columns"]) == (1, 2)
     assert result.stats["openings"] == 3
     assert result.stats["blender"].startswith("4.")
     assert "oak_wood_planks" in result.stats["textures"]
@@ -248,11 +262,23 @@ async def test_real_blender_exports_fbx_and_gltf(tmp_path: Path) -> None:
     top = max(a["max"][1] for a in positions("Stufe_treppe_15"))
     assert top == pytest.approx(2.75, abs=0.001)
 
+    # Terrasse: Belag auf Platte, Dach auf Wandhöhe über den Stützen, keine Decke/Leuchte
+    assert {"Terrasse_terrasse", "Vordach_terrasse", "Stuetze_00", "Stuetze_01"} <= names
+    assert not any(n.endswith("_terrasse") and n.startswith(("Ceiling", "Leuchte")) for n in names)
+    assert {"Vordach", "Terrassenplatte", "Stuetze"} <= materials
+    ceiling_height = max(a["max"][1] for a in positions("Wall_w0") if a.get("max"))
+    roof = positions("Vordach_terrasse")
+    assert min(a["min"][1] for a in roof) == pytest.approx(ceiling_height, abs=0.001)
+    assert max(a["max"][0] for a in roof) == pytest.approx(12.43 + 0.07 + 0.1, abs=0.001)
+    slab = positions("Terrasse_terrasse")
+    assert max(a["max"][1] for a in slab) == pytest.approx(0.0, abs=0.001)
+
     # Eingebranntes Licht: eine Lightmap als Occlusion auf der zweiten UV-Map der Raumhülle,
     # lose Möbel und Türen ohne (sie werden im Viewer normal beleuchtet)
     lightmap = result.stats["lightmap"]
     assert lightmap["px"] == 256
-    assert lightmap["receivers"] >= 7 + 2 + 2 + 16  # Wände, Böden, Decken, Stufen
+    # Wände, Böden, Decken, Stufen, Terrassenplatte, Dach, Stützen
+    assert lightmap["receivers"] >= 7 + 3 + 2 + 16 + 1 + 1 + 2
     extras = gltf["scenes"][0]["extras"]["lumira_lightmap"]
     assert extras["encoding"] == "reinhard"
     assert extras["key"] > 0

@@ -8,10 +8,11 @@ from typing import Literal
 import pytest
 
 from lumira_generator.logic.blender_runner import BakeOptions, BlenderError, run_blender
-from lumira_generator.logic.scene import FALLBACK_FLOOR, build_scene
+from lumira_generator.logic.scene import FALLBACK_FLOOR, FALLBACK_OUTDOOR_FLOOR, build_scene
 from lumira_shared import NonRetryableError
 from lumira_shared.models import (
     BLVResult,
+    Column,
     EquipmentVariant,
     FloorPlan,
     Material,
@@ -112,6 +113,72 @@ def test_scene_materials_follow_blv() -> None:
     ]
     assert scene["variants"] == []  # nur eine Variante im LV
     assert wall["footprint"] is None  # Quader aus Achse und Dicke
+
+
+def _terrace_plan() -> FloorPlan:
+    plan = _plan()
+    deck = [
+        Point2D(x=4_000, y=0),
+        Point2D(x=6_000, y=0),
+        Point2D(x=6_000, y=3_000),
+        Point2D(x=4_000, y=3_000),
+    ]
+    plan.rooms.append(
+        Room(
+            id="terrasse",
+            polygon=deck,
+            label="Terrasse überdacht",
+            room_type=RoomType.BALCONY,
+            outdoor=True,
+            roofed=True,
+        )
+    )
+    plan.columns = [
+        Column(id=f"c{n}", center=Point2D(x=6_050, y=y), size_mm=150)
+        for n, y in enumerate((0, 3_000))
+    ]
+    return plan
+
+
+def test_terrace_gets_decking_roof_and_columns() -> None:
+    plan = _terrace_plan()
+    scene = build_scene(plan, _blv(plan.project_id))
+
+    terrace = next(r for r in scene["rooms"] if r["id"] == "terrasse")
+    assert terrace["outdoor"] is True
+    # ohne Terrassenbelag im LV: Holzdielen statt Estrich
+    assert terrace["floor"]["kind"] == "texture"
+    assert terrace["floor"]["name"] == FALLBACK_OUTDOOR_FLOOR["name"]
+    # Dach über Belag und Stützen (+ Überstand)
+    xs = [x for x, _ in terrace["roof"]]
+    ys = [y for _, y in terrace["roof"]]
+    assert min(xs) == 4_000
+    assert max(xs) == pytest.approx(6_050 + 75 + 100)
+    assert (min(ys), max(ys)) == (pytest.approx(-175), pytest.approx(3_175))
+    assert [c["center"] for c in scene["columns"]] == [[6_050.0, 0.0], [6_050.0, 3_000.0]]
+    # Innenräume ohne Dach, keine Möbel auf der Terrasse
+    assert all(r["roof"] is None for r in scene["rooms"] if r["id"] != "terrasse")
+    assert not any(f["room_id"] == "terrasse" for f in scene["fixtures"])
+
+
+def test_terrace_floor_from_lv_exterior_material() -> None:
+    plan = _terrace_plan()
+    blv = _blv(plan.project_id)
+    blv.materials.append(
+        Material(
+            id="wpc",
+            category=MaterialCategory.FLOORING,
+            location=MaterialLocation.EXTERIOR,
+            name="Terrassenbelag WPC-Dielen",
+            color_hex="#6B5A4A",
+        )
+    )
+    blv.variants[0].material_ids.append("wpc")
+
+    terrace = next(r for r in build_scene(plan, blv)["rooms"] if r["id"] == "terrasse")
+
+    assert terrace["floor"]["name"] == "Terrassenbelag WPC-Dielen"
+    assert terrace["floor"]["texture"] == "plank_flooring_04"
 
 
 def test_scene_passes_exact_wall_footprint() -> None:

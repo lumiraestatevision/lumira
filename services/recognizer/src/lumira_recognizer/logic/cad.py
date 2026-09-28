@@ -14,9 +14,9 @@ Ablauf – alles in Millimetern, ohne Lernverfahren:
   5. Räume: farbig hinterlegte Flächen; ohne solche die von Wänden umschlossenen Flächen.
   6. Beschriftung: alle Texte im Raum („Küche“, „F: 13,39 m²“), reine Maßzahlen ausgenommen.
   7. Treppen: Ketten von Stufenflächen zwischen Trittkanten (stairs.py).
+  8. Terrassen, Balkone: Fläche um die Beschriftung außerhalb der Wände, Stützen (outdoor.py).
 
 Grenzen: Wände ohne Füllung (nur Doppellinien, Schraffur) → Rückfall auf detector.py.
-Terrassen und Balkone werden (noch) nicht als Räume erkannt.
 """
 
 from __future__ import annotations
@@ -30,8 +30,10 @@ from typing import Literal
 import cv2
 import numpy as np
 
+from lumira_recognizer.logic.outdoor import find_outdoor
 from lumira_recognizer.logic.stairs import find_stairs
 from lumira_shared.models import (
+    Column,
     DoorSwing,
     FilledArea,
     FloorPlan,
@@ -533,6 +535,15 @@ def _is_exterior(points: np.ndarray, raster: Raster) -> bool:
     return any(raster.is_outside(x, y) for x, y in _outward_points(points, 3 * RASTER_MM))
 
 
+def _lies_outside(polygon: list[Point2D], raster: Raster) -> bool:
+    """Liegt die Fläche außerhalb der Wände (Terrasse als farbige Fläche)?"""
+    pts = _array(polygon)
+    x, y = _centroid(pts)
+    if not _inside(pts, x, y):  # L-Form, Schwerpunkt daneben → im Zweifel Innenraum
+        return False
+    return raster.is_outside(x, y)
+
+
 def _rooms_from_raster(raster: Raster) -> list[list[Point2D]]:
     inner = ((raster.blocked == 0) & ~raster.outside).astype(np.uint8)
     contours, _ = cv2.findContours(inner, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -626,10 +637,48 @@ def recognize_cad(parsed: ParsedPlan) -> FloorPlan | None:
         polygons, room_source = _rooms_from_raster(raster), "von Wänden umschlossene Flächen"
     rooms = [
         Room(
-            id=f"room_{i:03d}", polygon=polygon, label=_label(polygon, parsed.texts), confidence=0.9
+            id=f"room_{i:03d}",
+            polygon=polygon,
+            label=_label(polygon, parsed.texts),
+            outdoor=_lies_outside(polygon, raster),  # farbig hinterlegte Terrasse
+            confidence=0.9,
         )
         for i, polygon in enumerate(polygons)
     ]
+
+    # Terrassen, Balkone: meist nicht gefüllt, nur Umriss, Belag und Stützen
+    house = [p.points for p in pieces] + [q for a in found for q in a.quads]
+    known = [_array(r.polygon) for r in rooms]
+    columns: list[Column] = []
+    for area in find_outdoor(
+        parsed.segments,
+        parsed.curves,
+        parsed.filled_areas,
+        [t for t in parsed.texts if not any(_inside(k, t.position.x, t.position.y) for k in known)],
+        house,
+        raster.is_outside,
+    ):
+        rooms.append(
+            Room(
+                id=f"room_{len(rooms):03d}",
+                polygon=area.polygon,
+                label=_label(area.polygon, parsed.texts),
+                outdoor=True,
+                roofed=area.roofed,
+                confidence=0.7,
+            )
+        )
+        columns += [
+            Column(
+                id=f"column_{len(columns) + n:03d}",
+                center=Point2D(x=float(c.center[0]), y=float(c.center[1])),
+                size_mm=min(c.size, 1_000.0),
+                angle_deg=c.angle_deg,
+                confidence=0.7,
+            )
+            for n, c in enumerate(area.columns)
+        ]
+    outdoor = [r for r in rooms if r.outdoor]
 
     stairs = find_stairs(parsed.segments, parsed.curves, [p.points for p in pieces])
 
@@ -645,10 +694,18 @@ def recognize_cad(parsed: ParsedPlan) -> FloorPlan | None:
         openings=openings,
         rooms=rooms,
         stairs=stairs,
+        columns=columns,
         metadata={
             "recognizer": "cad-fills",
             "wall_color": color,
             "rooms_from": room_source,
+            "outdoor": ", ".join(
+                f"{(r.label or 'Außenbereich').split()[0]} {r.area_m2:g} m²"
+                + (" überdacht" if r.roofed else "")
+                for r in outdoor
+            )
+            + (f", {len(columns)} Stützen" if columns else "")
+            or "keine",
             "openings": ", ".join(f"{k}: {v}" for k, v in sorted(counts.items())) or "keine",
             "stairs": ", ".join(f"{len(s.steps)} Stufen à {s.rise_mm:g} mm" for s in stairs)
             or "keine",

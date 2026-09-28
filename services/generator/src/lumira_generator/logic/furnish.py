@@ -653,6 +653,8 @@ def furnish(plan: FloorPlan, blv: BLVResult) -> list[dict[str, Any]]:
     walls = wall_outlines(plan)
     items: list[dict[str, Any]] = []
     for room in plan.rooms:
+        if room.outdoor:  # Terrasse/Balkon: (noch) keine Gartenmöbel
+            continue
         polygon = _ccw([(p.x, p.y) for p in room.polygon])
         layout = Layout(polygon, room_edges(polygon, spans, walls))
         if not layout.edges:

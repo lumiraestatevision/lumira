@@ -603,6 +603,7 @@ def build_floor(room):
     obj["lumira_room_type"] = room["type"]
     obj["lumira_room_id"] = room["id"]  # Varianten: Bodenbelag dieses Raums
     obj["lumira_label"] = room.get("label") or ""
+    obj["lumira_outdoor"] = bool(room.get("outdoor"))
     floor = room["floor"]
     xs = [x for x, _ in room["polygon"]]
     ys = [y for _, y in room["polygon"]]
@@ -743,6 +744,43 @@ def build_ceiling(room, height, holes=(), slab=0.0):
     light.data.color = (1.0, 0.93, 0.84)  # warmweiß
     light.location = (cx, cy, height - 0.045)
     bpy.context.scene.collection.objects.link(light)
+
+
+# ------------------------------------------------------------------ Außenbereiche
+TERRACE_SLAB_M = 0.15
+TERRACE_BASE_COLOR = "#A7A39C"
+ROOF_THICKNESS_M = 0.2
+ROOF_COLOR = "#EDEBE6"
+COLUMN_COLOR = "#5E5A55"
+
+
+def build_outdoor(room, height):
+    """Terrasse/Balkon: Belag (build_floor) auf einer Betonplatte, deren Kante man von außen
+    sieht; überdacht → Dachplatte auf Wandhöhe (``room["roof"]``: Umriss inkl. Stützen). Im
+    Viewer blendet die Draufsicht das Dach wie die Decken aus (Material „Vordach“)."""
+    base = prism(f"Terrasse_{room['id']}", room["polygon"], TERRACE_SLAB_M)
+    base.location.z = -TERRACE_SLAB_M
+    apply_transform(base)
+    box_uv(base, UV_METERS)
+    base.data.materials.append(material("Terrassenplatte", TERRACE_BASE_COLOR, roughness=0.9))
+    if room.get("roof"):
+        roof = prism(f"Vordach_{room['id']}", room["roof"], ROOF_THICKNESS_M)
+        roof.location.z = height
+        apply_transform(roof)
+        box_uv(roof, UV_METERS)
+        roof.data.materials.append(material("Vordach", ROOF_COLOR, roughness=0.85))
+
+
+def build_column(column, n, height):
+    """Stütze vom Boden bis unter das Dach."""
+    size = column["size"] * MM
+    x, y = column["center"][0] * MM, column["center"][1] * MM
+    obj = box(
+        f"Stuetze_{n:02d}", (size, size, height), (x, y, height / 2), math.radians(column["angle"])
+    )
+    apply_transform(obj)
+    box_uv(obj, UV_METERS)
+    obj.data.materials.append(material("Stuetze", COLUMN_COLOR, roughness=0.6))
 
 
 # ------------------------------------------------------------------ Treppen
@@ -1184,7 +1222,7 @@ def build_fixture(fixture):
 # ------------------------------------------------------------------ Licht einbrennen
 # Empfänger: feste Raumhülle. Lose Möbel werfen keinen Schatten (sonst blieben beim Ausblenden
 # „Geisterschatten“ zurück), Glas lässt das Licht durch.
-RECEIVER_PREFIXES = ("Wall_", "Floor_", "Ceiling_", "Stufe_")
+RECEIVER_PREFIXES = ("Wall_", "Floor_", "Ceiling_", "Stufe_", "Terrasse_", "Vordach_", "Stuetze_")
 SHADOWLESS_PREFIXES = ("Moebel_", "Glas_")
 SKY_COLOR = (0.82, 0.88, 1.0)  # leicht bläulich bedeckt – neutral genug für helle Fassaden
 SKY_STRENGTH = 1.0
@@ -1358,8 +1396,8 @@ def _floor_luminance(pixels, size):
     samples = []
     weights = ((1 / 3, 1 / 3, 1 / 3), (0.6, 0.2, 0.2), (0.2, 0.6, 0.2), (0.2, 0.2, 0.6))
     for obj in bpy.context.scene.objects:
-        if not obj.name.startswith("Floor_"):
-            continue
+        if not obj.name.startswith("Floor_") or obj.get("lumira_outdoor"):
+            continue  # Terrasse in der Sonne ist kein Bezug für die Innenräume
         mesh = obj.data
         layer = mesh.uv_layers[LIGHTMAP_UV].data
         mesh.calc_loop_triangles()
@@ -1577,7 +1615,13 @@ def main():
     storey = max((stair["floor_to_floor"] * MM for stair in stairs), default=ceiling)
     for room in scene_spec["rooms"]:
         build_floor(room)
-        build_ceiling(room, ceiling, holes, slab=max(storey - ceiling, 0.0))
+        if room.get("outdoor"):
+            build_outdoor(room, ceiling)
+        else:
+            build_ceiling(room, ceiling, holes, slab=max(storey - ceiling, 0.0))
+    columns = scene_spec.get("columns", [])
+    for n, column in enumerate(columns):
+        build_column(column, n, ceiling)
     fixtures = scene_spec.get("fixtures", [])
     for fixture in fixtures:
         build_fixture(fixture)
@@ -1611,6 +1655,8 @@ def main():
         "openings": openings,
         "stairs": len(stairs),
         "steps": steps,
+        "outdoor": sum(1 for r in scene_spec["rooms"] if r.get("outdoor")),
+        "columns": len(columns),
         "fixtures": len(fixtures),
         "loose": sum(1 for f in fixtures if f["loose"]),
         "objects": len(bpy.data.objects),

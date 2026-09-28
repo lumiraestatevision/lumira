@@ -12,6 +12,7 @@ from lumira_shared.models.blv import (
 from lumira_shared.models.floorplan import (
     DEFAULT_FLOOR_TO_FLOOR_MM,
     DEFAULT_WALL_HEIGHT_MM,
+    Column,
     DoorSwing,
     FloorPlan,
     Opening,
@@ -30,6 +31,7 @@ __all__ = [
     "DEFAULT_WALL_HEIGHT_MM",
     "BLVResult",
     "ColorSource",
+    "Column",
     "Confidence",
     "DoorSwing",
     "EquipmentVariant",

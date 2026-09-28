@@ -116,6 +116,10 @@ class Room(LumiraModel):
     label_area_m2: float | None = Field(default=None, gt=0, description="Im Plan angegebene Fläche")
     floor_level: int = 0
     wall_ids: list[str] = Field(default_factory=list)
+    outdoor: bool = Field(
+        default=False, description="Außenbereich (Terrasse, Balkon) – keine Decke, keine Möbel"
+    )
+    roofed: bool = Field(default=False, description="Außenbereich mit Dach („überdacht“)")
     confidence: Confidence = 1.0
 
     @computed_field
@@ -140,6 +144,16 @@ class Stair(LumiraModel):
     confidence: Confidence = 1.0
 
 
+class Column(LumiraModel):
+    """Stütze (z. B. unter dem Terrassendach): quadratischer Querschnitt um ``center``."""
+
+    id: str = Field(default_factory=lambda: new_id("column"))
+    center: Point2D
+    size_mm: float = Field(gt=0, le=1_000)
+    angle_deg: float = 0.0
+    confidence: Confidence = 1.0
+
+
 class FloorPlan(LumiraModel):
     project_id: UUID
     source_key: str = Field(description="S3-Key der Originaldatei")
@@ -152,6 +166,7 @@ class FloorPlan(LumiraModel):
     openings: list[Opening] = Field(default_factory=list)
     rooms: list[Room] = Field(default_factory=list)
     stairs: list[Stair] = Field(default_factory=list)
+    columns: list[Column] = Field(default_factory=list)
     metadata: dict[str, str] = Field(default_factory=dict)
 
     @model_validator(mode="after")
@@ -161,6 +176,7 @@ class FloorPlan(LumiraModel):
             + [o.id for o in self.openings]
             + [r.id for r in self.rooms]
             + [s.id for s in self.stairs]
+            + [c.id for c in self.columns]
         )
         duplicates = sorted(i for i, n in Counter(all_ids).items() if n > 1)
         if duplicates:

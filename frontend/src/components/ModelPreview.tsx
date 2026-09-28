@@ -30,9 +30,10 @@ const EXPOSURE_BAKED = 1.35;
 
 // Materialnamen aus dem Generator (build_scene.py):
 //   „Moebel: …“  lose Möbel – per Knopf ein-/ausblendbar
-//   „Decke“, „Leuchte“ – verdecken in der Draufsicht die Räume, daher immer aus
+//   „Decke“, „Leuchte“, „Vordach“ – verdecken in der Draufsicht die Räume/Terrasse, daher aus
 const isFurniture = (m: ViewerMaterial) => m.name.startsWith("Moebel:");
-const isCeiling = (m: ViewerMaterial) => m.name === "Decke" || m.name === "Leuchte";
+const CEILINGS = new Set(["Decke", "Leuchte", "Vordach"]);
+const isCeiling = (m: ViewerMaterial) => CEILINGS.has(m.name);
 
 // Ausblenden ohne zweites Modell: Alpha 0 + Maskierung verwirft jedes Pixel.
 function setVisible(material: ViewerMaterial, visible: boolean, original: Map<ViewerMaterial, [string, number[]]>) {

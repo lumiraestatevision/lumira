@@ -11,7 +11,7 @@ from typing import Any
 
 from lumira_generator.logic.furnish import furnish, point_in_polygon, wall_outlines
 from lumira_generator.logic.railing import stair_railing
-from lumira_generator.logic.surfaces import describe
+from lumira_generator.logic.surfaces import TEXTURES_MM, describe
 from lumira_shared.models import (
     BLVResult,
     FloorPlan,
@@ -20,6 +20,7 @@ from lumira_shared.models import (
     MaterialLocation,
     Opening,
     OpeningType,
+    Room,
     RoomType,
     Stair,
     Wall,
@@ -69,6 +70,83 @@ def _floor_for(blv: BLVResult, room_type: RoomType, variant: str | None) -> dict
     if borrowed_from is not None:
         surface["from_variant"] = borrowed_from
     return surface
+
+
+FALLBACK_OUTDOOR_FLOOR = {
+    "name": "Terrassendielen",
+    "color": "#8B6B4E",
+    "kind": "texture",
+    "texture": "plank_flooring_04",
+    "size_mm": TEXTURES_MM["plank_flooring_04"],
+}
+_OUTDOOR_FLOOR = re.compile(r"terrass|balkon|loggia|au[ßs]enbelag")
+
+
+def _outdoor_floor(blv: BLVResult, variant: str | None) -> dict[str, Any]:
+    """Belag von Terrasse/Balkon laut LV („Terrassenbelag …“, meist Lage außen) – sonst
+    Holzdielen, die übliche Ausführung überdachter Terrassen."""
+    found = [
+        m
+        for m in blv.materials_for(variant=variant)
+        if m.category in (*_FLOOR_CATEGORIES, MaterialCategory.OTHER)
+        and m.is_final_surface
+        and _OUTDOOR_FLOOR.search(m.name.lower())
+    ]
+    if not found:
+        return dict(FALLBACK_OUTDOOR_FLOOR)
+    return describe(found[0], fallback=FALLBACK_OUTDOOR_FLOOR, outdoor=True)
+
+
+def _room_floor(blv: BLVResult, room: Room, variant: str | None) -> dict[str, Any]:
+    if room.outdoor:
+        return _outdoor_floor(blv, variant)
+    return _floor_for(blv, room.room_type, variant)
+
+
+ROOF_OVERHANG_MM = 100.0  # Dach steht über die Stützen hinaus
+_COLUMN_REACH_MM = 1_000.0
+
+
+def _convex_hull(points: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    pts = sorted(set(points))
+    if len(pts) < 3:
+        return pts
+
+    def half(seq: list[tuple[float, float]]) -> list[tuple[float, float]]:
+        out: list[tuple[float, float]] = []
+        for p in seq:
+            while (
+                len(out) >= 2
+                and (
+                    (out[-1][0] - out[-2][0]) * (p[1] - out[-2][1])
+                    - (out[-1][1] - out[-2][1]) * (p[0] - out[-2][0])
+                )
+                <= 0
+            ):
+                out.pop()
+            out.append(p)
+        return out[:-1]
+
+    return half(pts) + half(pts[::-1])
+
+
+def _roof(plan: FloorPlan, room: Room) -> list[list[float]] | None:
+    """Dach über einem überdachten Außenbereich: Hülle aus Belag und den Stützen daneben."""
+    if not (room.outdoor and room.roofed):
+        return None
+    polygon = [(p.x, p.y) for p in room.polygon]
+    xs, ys = [x for x, _ in polygon], [y for _, y in polygon]
+    points = list(polygon)
+    for column in plan.columns:
+        cx, cy = column.center.x, column.center.y
+        if not (
+            min(xs) - _COLUMN_REACH_MM <= cx <= max(xs) + _COLUMN_REACH_MM
+            and min(ys) - _COLUMN_REACH_MM <= cy <= max(ys) + _COLUMN_REACH_MM
+        ):
+            continue
+        half = column.size_mm / 2 + ROOF_OVERHANG_MM
+        points += [(cx + dx, cy + dy) for dx in (-half, half) for dy in (-half, half)]
+    return [[x, y] for x, y in _convex_hull(points)]
 
 
 def _first(blv: BLVResult, variant: str | None, category: MaterialCategory) -> Material | None:
@@ -236,14 +314,14 @@ def _variants(plan: FloorPlan, blv: BLVResult, chosen: str | None) -> list[dict[
 
     def surfaces(name: str | None) -> dict[str, Any]:
         return {
-            "floors": {r.id: plain(_floor_for(blv, r.room_type, name)) for r in plan.rooms},
+            "floors": {r.id: plain(_room_floor(blv, r, name)) for r in plan.rooms},
             "treads": {s.id: plain(_stair_tread(plan, s, blv, name)) for s in plan.stairs},
         }
 
     # LVs führen Varianten oft als Einzeloptionen („Parkett statt Estrich“, „Fliesen im WC“):
     # Räume ohne eigenen Belag in einer Variante zeigen den Belag der Grundansicht. Leiht die
     # Grundansicht selbst aus anderen Varianten, ist sie eine Musterausstattung, kein „Standard“.
-    borrowed = any("from_variant" in _floor_for(blv, r.room_type, chosen) for r in plan.rooms)
+    borrowed = any("from_variant" in _room_floor(blv, r, chosen) for r in plan.rooms)
     seen = [surfaces(chosen)]
     variants = [{"name": "Musterausstattung" if borrowed else chosen or "Standard", **seen[0]}]
     for variant in blv.variants:
@@ -256,7 +334,7 @@ def _variants(plan: FloorPlan, blv: BLVResult, chosen: str | None) -> list[dict[
 
 def build_scene(plan: FloorPlan, blv: BLVResult, *, variant: str | None = None) -> dict[str, Any]:
     chosen = variant or (blv.default_variant.name if blv.default_variant else None)
-    floors = {room.id: _floor_for(blv, room.room_type, chosen) for room in plan.rooms}
+    floors = {room.id: _room_floor(blv, room, chosen) for room in plan.rooms}
     thresholds = {
         o.id: _threshold_room(plan, plan.wall(o.wall_id), o)
         for o in plan.openings
@@ -297,8 +375,15 @@ def build_scene(plan: FloorPlan, blv: BLVResult, *, variant: str | None = None) 
             "label": room.label,
             "polygon": [[p.x, p.y] for p in room.polygon],
             "floor": floors[room.id],
+            # Außenbereich: Belag auf einer Platte, keine Decke/Leuchte; überdacht → Dach
+            "outdoor": room.outdoor,
+            "roof": _roof(plan, room),
         }
         for room in plan.rooms
+    ]
+    columns = [
+        {"center": [c.center.x, c.center.y], "size": c.size_mm, "angle": c.angle_deg}
+        for c in plan.columns
     ]
     return {
         "units": "mm",
@@ -310,6 +395,7 @@ def build_scene(plan: FloorPlan, blv: BLVResult, *, variant: str | None = None) 
         "walls": walls,
         "rooms": rooms,
         "stairs": _stairs(plan, blv, chosen),
+        "columns": columns,
         "variants": _variants(plan, blv, chosen),
         # Einrichtung: feste Ausstattung (Küche, Sanitär) + lose Möbel (im Viewer ausblendbar)
         "fixtures": furnish(plan, blv),

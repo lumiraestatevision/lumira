@@ -33,7 +33,10 @@ TEXTURES_MM: dict[str, float] = {
 _WOOD_RULES: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"fischgr[äa]t|herringbone"), "herringbone_parquet"),
     (
-        re.compile(r"nussbaum|walnuss|r[äa]uchereiche|wenge|dunkel|terrasse|balkon"),
+        re.compile(
+            r"nussbaum|walnuss|r[äa]uchereiche|wenge|dunkel|terrasse|balkon"
+            r"|wpc|bangkirai|l[äa]rche|douglasie|thermo"
+        ),
         "plank_flooring_04",
     ),
     (re.compile(r"landhaus|vinyl|designbelag|klick"), "laminate_floor_03"),
@@ -42,6 +45,7 @@ _WOOD_RULES: list[tuple[re.Pattern[str], str]] = [
 ]
 _TILES = re.compile(r"fliese|feinsteinzeug|steinzeug|keramik|naturstein|marmor|granit|terrazzo")
 _CARPET = re.compile(r"teppich|velours|schlingen")
+_SLABS = re.compile(r"platte|pflaster|beton|stein")  # Terrassenplatten (außen)
 _TIMES = chr(0xD7)  # Malzeichen – steht in LVs oft statt „x“ („60 mal 60 cm“)
 _FORMAT = re.compile(
     rf"(\d{{1,4}}(?:[.,]\d)?)\s*[x{_TIMES}/]\s*(\d{{1,4}}(?:[.,]\d)?)\s*(mm|cm)?", re.IGNORECASE
@@ -74,21 +78,30 @@ def _grout(tile_mm: tuple[float, float]) -> float:
 
 
 def describe(
-    material: Material | None, *, fallback: dict[str, str], wall: bool = False
+    material: Material | None,
+    *,
+    fallback: dict[str, Any],
+    wall: bool = False,
+    outdoor: bool = False,
 ) -> dict[str, Any]:
-    """Oberfläche für Blender. ``fallback`` = {"name", "color"} ohne passendes LV-Material."""
+    """Oberfläche für Blender. ``fallback`` = {"name", "color"} ohne passendes LV-Material.
+    ``outdoor``: Terrassen-/Balkonbelag (LV-Kategorie Außen) – Platten oder Dielen."""
     if material is None:
         return {"kind": "plaster" if wall else "plain", **fallback}
     text = _text(material)
     color = material.color_hex or fallback["color"]
     base = {"name": material.name, "color": color}
 
-    if material.category is MaterialCategory.TILES or _TILES.search(text):
+    if (
+        material.category is MaterialCategory.TILES
+        or _TILES.search(text)
+        or (outdoor and _SLABS.search(text))
+    ):
         tile = tile_format_mm(material.format or text, wall=wall)
         return {**base, "kind": "tiles", "tile_mm": list(tile), "grout_mm": _grout(tile)}
     if _CARPET.search(text):
         return {**base, "kind": "carpet"}
-    if material.category in (MaterialCategory.FLOORING, MaterialCategory.STAIRS):
+    if outdoor or material.category in (MaterialCategory.FLOORING, MaterialCategory.STAIRS):
         for pattern, texture in _WOOD_RULES:
             if pattern.search(text):
                 return {
